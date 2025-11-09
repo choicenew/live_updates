@@ -1,8 +1,0 @@
-<resources>
-    <string name="app_name">LiveUpdateNotification</string>
-    <string name="get_fcm_token">Get FCM Token</string>
-    <string name="sent_local_notification">Send Local Notification</string>
-    <string name="local_notification_title">Local Notification Title</string>
-    <string name="local_notification_text">Local Notification Text</string>
-    <string name="notification_permission_denied_some_features_might_be_unavailable">Notification permission denied. Some features might be unavailable.</string>
-</resources>
