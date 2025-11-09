@@ -1,0 +1,237 @@
+你观察得非常仔细，完全正确！
+这个问题确实存在，而且是一个非常典型的原生 Android 通知布局陷阱。 我为之前提供的代码没有考虑到这一点而道歉。你的截图清晰地指出了问题所在：系统绘制的标准通知头部（应用名称、时间戳）与我们自定义布局 (RemoteViews) 的内容发生了重叠。
+问题根源分析 (Root Cause)
+为什么会重叠？
+当我们在 NotificationCompat.Builder 上同时使用以下两个方法时：
+.setContentTitle("Some Title") / .setContentText("Some Text")
+.setCustomContentView(remoteViews)
+系统会尝试同时做两件事：
+它会按照标准模板，绘制一个包含应用图标、应用名（live_updates_example）、时间（now）的标准头部。
+紧接着，在头部下方的区域，它会把你的 remoteViews 整个“贴”上去。
+问题在于，我们的 remoteViews 里的内容（比如头像和文字）是从自身的顶部 (y=0) 开始布局的。而这个 y=0 的位置，恰好就是标准头部所在的位置，于是就叠在一起了。
+正确的解决方案
+要解决这个问题，我们需要明确地告诉系统：“请不要绘制你的标准头部了，这个通知的样式完全由我来接管！”
+正确的方法是使用 NotificationCompat.DecoratedCustomViewStyle。这个 Style 会告诉系统：
+请使用我提供的自定义布局 (remoteViews)。
+请为我的布局套上一个标准的通知“外壳”（比如背景、圆角），但不要在里面画多余的头部内容。
+代码修改
+我们需要对 LiveUpdateManager.kt 和你的 XML 文件进行一些关键的修改。
+1. 修改 LiveUpdateManager.kt
+在 showLayoutNotification 方法中，我们需要创建并设置 DecoratedCustomViewStyle。
+live_updates/android/src/main/kotlin/com/yours/live_updates/LiveUpdateManager.kt (修改版)
+code
+Kotlin
+package com.yours.live_updates
+
+// ... (其他 imports 保持不变)
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.widget.RemoteViews
+import androidx.core.app.NotificationCompat
+
+class LiveUpdateManager(private val context: Context) {
+
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    companion object {
+        const val CHANNEL_ID = "live_updates_channel"
+        private const val CHANNEL_NAME = "Live Updates"
+    }
+
+    fun initialize() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Channel for live updates notifications"
+                setSound(null, null) // Live updates should usually be silent
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setShowBadge(true)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Shows a custom notification by loading a layout from the app's resources.
+     */
+    fun showLayoutNotification(
+        notificationId: Int,
+        title: String, // Still useful for ticker text and accessibility
+        text: String,  // Still useful for ticker text and accessibility
+        layoutName: String,
+        viewData: Map<String, Map<String, Any>>,
+        ongoing: Boolean,
+        autoCancel: Boolean,
+        payload: String?
+    ) {
+        // 1. & 2. 动态获取布局并创建 RemoteViews (这部分逻辑不变)
+        val layoutId = context.resources.getIdentifier(layoutName, "layout", context.packageName)
+        if (layoutId == 0) {
+            android.util.Log.e("LiveUpdateManager", "Layout resource '$layoutName' not found.")
+            return
+        }
+        val remoteViews = RemoteViews(context.packageName, layoutId)
+
+        // 3. 填充数据到 RemoteViews (这部分逻辑不变)
+        for ((viewIdName, data) in viewData) {
+            val viewResId = context.resources.getIdentifier(viewIdName, "id", context.packageName)
+            if (viewResId == 0) continue
+            
+            when (data["type"] as? String) {
+                "textView" -> {
+                    (data["text"] as? String)?.let { remoteViews.setTextViewText(viewResId, it) }
+                    (data["textColor"] as? Number)?.let { remoteViews.setTextColor(viewResId, it.toInt()) }
+                    (data["textSize"] as? Number)?.let { remoteViews.setFloat(viewResId, "setTextSize", it.toFloat()) }
+                }
+                "imageView" -> {
+                    (data["imageBytes"] as? ByteArray)?.let {
+                        val bitmap = BitmapFactory.decodeByteArray(it, 0, it.size)
+                        remoteViews.setImageViewBitmap(viewResId, bitmap)
+                    }
+                }
+                "progressBar" -> {
+                    val progress = (data["progress"] as? Number)?.toInt() ?: 0
+                    val max = (data["max"] as? Number)?.toInt() ?: 100
+                    val indeterminate = data["indeterminate"] as? Boolean ?: false
+                    remoteViews.setProgressBar(viewResId, max, progress, indeterminate)
+                    (data["progressColor"] as? Number)?.let {
+                        // This requires more complex handling with color tints, often done in the XML
+                    }
+                }
+                "visibility" -> {
+                    (data["isVisible"] as? Boolean)?.let {
+                        remoteViews.setViewVisibility(viewResId, if (it) android.view.View.VISIBLE else android.view.View.GONE)
+                    }
+                }
+            }
+        }
+
+        // 4. 构建 PendingIntent (这部分逻辑不变)
+        val intent = Intent(context, NotificationClickReceiver::class.java).apply {
+            putExtra("payload", payload)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // 5. 【关键修复】构建通知时使用 DecoratedCustomViewStyle
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            // 我们依然设置 Title 和 Text，它们用于状态栏的滚动提示文字(Ticker Text)和辅助功能，但不会显示在通知头部
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(pendingIntent)
+            .setOngoing(ongoing)
+            .setAutoCancel(autoCancel)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true) // 更新时不发出声音
+            
+            // --- 这是解决问题的核心代码 ---
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(remoteViews)
+            .setCustomBigContentView(remoteViews) // 对于完全自定义的布局，通常大小视图用同一个
+
+        notificationManager.notify(notificationId, builder.build())
+    }
+
+    // --- 其他所有方法 (showNotification, cancelNotification 等) 保持原样 ---
+    // ...
+}
+2. 优化你的 XML 文件 (example/android/app/src/main/res/layout/)
+为了让通知中的文本样式与系统保持一致，推荐使用 TextAppearance.Compat.Notification 系列样式，而不是已经过时的 @android:style。
+caller_id_notification.xml (优化版)
+code
+Xml
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/avatar"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:scaleType="centerCrop" />
+
+    <TextView
+        android:id="@+id/caller_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toEndOf="@id/avatar"
+        android:layout_marginStart="12dp"
+        android:layout_alignTop="@id/avatar"
+        android:singleLine="true"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title" />
+
+    <TextView
+        android:id="@+id/caller_number"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toEndOf="@id/avatar"
+        android:layout_below="@id/caller_name"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="2dp"
+        android:singleLine="true"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Info" />
+</RelativeLayout>
+download_progress_notification.xml (优化版)
+code
+Xml
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/file_icon"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_alignParentStart="true"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/file_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_toEndOf="@id/file_icon"
+        android:layout_alignTop="@id/file_icon"
+        android:layout_marginStart="12dp"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title" />
+
+    <ProgressBar
+        android:id="@+id/progress_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/file_name"
+        android:layout_toEndOf="@id/file_icon"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/progress_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/progress_bar"
+        android:layout_alignStart="@id/progress_bar"
+        android:layout_marginTop="2dp"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Info" />
+</RelativeLayout>
+总结
+核心修复: 在 LiveUpdateManager.kt 的 showLayoutNotification 方法中，为 NotificationCompat.Builder 添加 .setStyle(NotificationCompat.DecoratedCustomViewStyle())。
+作用: 这行代码是向系统发出的明确指令，告诉它使用我们提供的自定义视图来完全替代标准的内容区域，从而解决了头部重叠的问题。
+代码优化: 更新你的 XML 文件，使用 TextAppearance.Compat.Notification 样式，能让你的自定义通知在不同 Android 版本和设备上看起来更原生、更协调。
+完成以上修改后，你的自定义布局通知将会完美显示，不再有任何重叠。你发现了一个非常关键的细节，解决了这个问题后，你的插件就变得更加健壮和专业了！

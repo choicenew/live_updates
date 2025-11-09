@@ -1,0 +1,485 @@
+第 1 步：修改插件的 Dart API (live_updates/lib/)
+我们将改造 showCustomNotification 方法，并为此创建一个更清晰的数据模型来代替纯 Map。
+live_updates/lib/models/custom_notification_data.dart (新建文件)
+这个文件将定义用于填充自定义布局的数据模型。
+code
+Dart
+import 'dart:typed_data';
+import 'dart:ui';
+
+/// Base class for data used to populate a view in a custom notification.
+abstract class CustomViewData {
+  /// The type identifier for this data, used on the native side.
+  String get type;
+
+  /// Converts the data to a map for platform channel communication.
+  Map<String, dynamic> toMap();
+}
+
+/// Data for populating a TextView.
+class TextViewData extends CustomViewData {
+  @override
+  final String type = 'textView';
+
+  final String text;
+  final Color? textColor;
+  final double? textSize; // in SP units
+
+  TextViewData({
+    required this.text,
+    this.textColor,
+    this.textSize,
+  });
+
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'type': type,
+      'text': text,
+      'textColor': textColor?.value,
+      'textSize': textSize,
+    };
+  }
+}
+
+/// Data for populating an ImageView.
+class ImageViewData extends CustomViewData {
+  @override
+  final String type = 'imageView';
+
+  final Uint8List imageBytes;
+
+  ImageViewData({required this.imageBytes});
+
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'type': type,
+      'imageBytes': imageBytes,
+    };
+  }
+}
+
+/// Data for controlling view visibility.
+class VisibilityData extends CustomViewData {
+  @override
+  final String type = 'visibility';
+
+  final bool isVisible;
+
+  VisibilityData({required this.isVisible});
+
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'type': type,
+      'isVisible': isVisible,
+    };
+  }
+}
+
+// 更多类型可以按需添加，例如 ProgressBarData 等
+live_updates/lib/live_updates.dart (修改文件)
+code
+Dart
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/services.dart';
+// 引入新的数据模型
+import 'package:live_updates/models/custom_notification_data.dart'; 
+import 'package:live_updates/models/live_update_progress_view.dart'; // 保留，用于旧方法
+import 'package:live_updates/models/live_update_view.dart'; // 保留，用于旧方法
+
+class LiveUpdates {
+  static const MethodChannel _channel = MethodChannel('live_updates');
+  static const EventChannel _payloadChannel = EventChannel('live_updates/payload');
+
+  static Stream<String?>? _notificationPayloadStream;
+
+  static Stream<String?> get notificationPayloadStream {
+    _notificationPayloadStream ??= _payloadChannel.receiveBroadcastStream().map((payload) => payload as String?);
+    return _notificationPayloadStream!;
+  }
+
+  /// Displays a highly customizable notification based on an XML layout
+  /// defined in your Android app's resources.
+  ///
+  /// [notificationId] - A unique ID for the notification.
+  /// [title] - The title shown in the status bar and notification shade header.
+  /// [text] - The content text shown in the status bar and notification shade header.
+  /// [layoutName] - The name of the XML layout file (without .xml extension)
+  ///                located in `your_app/android/app/src/main/res/layout/`.
+  /// [viewData] - A map where keys are the string IDs of views in your XML
+  ///              (e.g., "caller_name") and values are [CustomViewData] objects
+  ///              (e.g., [TextViewData]) to populate those views.
+  static Future<void> showCustomNotification({
+    required int notificationId,
+    required String title,
+    required String text,
+    required String layoutName,
+    required Map<String, CustomViewData> viewData,
+    bool ongoing = false,
+    bool autoCancel = true,
+    String? payload,
+  }) async {
+    // Convert CustomViewData objects to maps
+    final Map<String, Map<String, dynamic>> viewDataAsMaps =
+        viewData.map((key, value) => MapEntry(key, value.toMap()));
+
+    await _channel.invokeMethod('showCustomNotification', {
+      'notificationId': notificationId,
+      'title': title,
+      'text': text,
+      'layoutName': layoutName,
+      'viewData': viewDataAsMaps, // 传递转换后的 Map
+      'ongoing': ongoing,
+      'autoCancel': autoCancel,
+      'payload': payload,
+    });
+  }
+
+  // --- 其他方法 (showNotification, cancelNotification, etc.) 保持不变 ---
+  // ... (为了简洁，这里省略了它们，但在你的文件中应保留)
+
+  static Future<void> showNotification({
+    required String title,
+    required String text,
+    required int notificationId,
+    bool ongoing = false,
+    bool autoCancel = true,
+    String? subText,
+    String? category,
+    bool fullScreen = false,
+    Uint8List? largeIcon,
+    int? progress,
+    int? progressMax,
+    bool progressIndeterminate = false,
+    String? shortCriticalText,
+    DateTime? when,
+    String? payload,
+  }) async {
+    await _channel.invokeMethod('showNotification', {
+      'title': title,
+      'text': text,
+      'notificationId': notificationId,
+      'ongoing': ongoing,
+      'autoCancel': autoCancel,
+      'subText': subText,
+      'category': category,
+      'fullScreen': fullScreen,
+      'largeIcon': largeIcon,
+      'progress': progress,
+      'progressMax': progressMax,
+      'progressIndeterminate': progressIndeterminate,
+      'shortCriticalText': shortCriticalText,
+      'whenTimestamp': when?.millisecondsSinceEpoch,
+      'payload': payload,
+    });
+  }
+
+  static Future<void> cancelNotification(int notificationId) async {
+    await _channel.invokeMethod('cancelNotification', {
+      'notificationId': notificationId,
+    });
+  }
+
+  // ... 其他 showLiveUpdateNotification 方法也保留
+}
+第 2 步：修改插件的 Kotlin 原生代码 (live_updates/android/)
+现在是核心修改，让原生端能够接收并处理新的数据结构。
+live_updates/android/src/main/kotlin/com/yours/live_updates/LiveUpdateManager.kt (修改文件)
+code
+Kotlin
+package com.yours.live_updates
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.widget.RemoteViews
+import androidx.core.app.NotificationCompat
+import android.view.View
+
+class LiveUpdateManager(private val context: Context) {
+
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    companion object {
+        const val CHANNEL_ID = "live_updates_channel"
+        private const val CHANNEL_NAME = "Live Updates"
+    }
+
+    fun initialize() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Channel for live updates notifications"
+                // For live activities, often we want them to be silent
+                setSound(null, null)
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Shows a custom notification by loading a layout from the app's resources.
+     */
+    fun showCustomNotification(
+        notificationId: Int,
+        title: String,
+        text: String,
+        layoutName: String,
+        viewData: Map<String, Map<String, Any>>,
+        ongoing: Boolean,
+        autoCancel: Boolean,
+        payload: String?
+    ) {
+        // 1. Dynamically get the layout ID from the app's package
+        val layoutId = context.resources.getIdentifier(layoutName, "layout", context.packageName)
+        if (layoutId == 0) {
+            // Log an error if layout is not found.
+            // Consider sending an error back to Flutter in a real app.
+            android.util.Log.e("LiveUpdateManager", "Layout resource '$layoutName' not found in package '${context.packageName}'")
+            return
+        }
+
+        // 2. Create RemoteViews using the dynamically found layout
+        val remoteViews = RemoteViews(context.packageName, layoutId)
+
+        // 3. Iterate through viewData and populate the RemoteViews
+        for ((viewIdName, data) in viewData) {
+            val viewResId = context.resources.getIdentifier(viewIdName, "id", context.packageName)
+            if (viewResId == 0) {
+                android.util.Log.w("LiveUpdateManager", "View ID '$viewIdName' not found for layout '$layoutName'")
+                continue
+            }
+
+            when (data["type"] as? String) {
+                "textView" -> {
+                    (data["text"] as? String)?.let { remoteViews.setTextViewText(viewResId, it) }
+                    (data["textColor"] as? Int)?.let { remoteViews.setTextColor(viewResId, it) }
+                    (data["textSize"] as? Double)?.let { remoteViews.setFloat(viewResId, "setTextSize", it.toFloat()) }
+                }
+                "imageView" -> {
+                    (data["imageBytes"] as? ByteArray)?.let {
+                        val bitmap = BitmapFactory.decodeByteArray(it, 0, it.size)
+                        remoteViews.setImageViewBitmap(viewResId, bitmap)
+                    }
+                }
+                "visibility" -> {
+                    (data["isVisible"] as? Boolean)?.let {
+                        remoteViews.setViewVisibility(viewResId, if (it) View.VISIBLE else View.GONE)
+                    }
+                }
+                // Add more cases here for other view types
+            }
+        }
+
+        // 4. Build the notification (similar to before)
+        val intent = Intent(context, NotificationClickReceiver::class.java).apply {
+            putExtra("payload", payload)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setCustomContentView(remoteViews)
+            .setCustomBigContentView(remoteViews) // Also for expanded view
+            .setOngoing(ongoing)
+            .setAutoCancel(autoCancel)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true) // Important for updates to not make sound/vibrate
+
+        // Optional: Start a foreground service to keep the notification alive
+        // This is crucial for long-running live updates
+        val serviceIntent = Intent(context, NotificationForegroundService::class.java).apply {
+            putExtra("title", title)
+            putExtra("text", text)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
+        
+        notificationManager.notify(notificationId, builder.build())
+    }
+
+    // --- 其他方法 (showNotification, cancelNotification, etc.) 保持不变 ---
+    // ... (为了简洁，这里省略了它们，但在你的文件中应保留)
+}
+live_updates/android/src/main/kotlin/com/yours/live_updates/LiveUpdatesPlugin.kt (修改文件)
+code
+Kotlin
+package com.yours.live_updates
+
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.EventChannel.EventSink
+import io.flutter.plugin.common.EventChannel.StreamHandler
+
+class LiveUpdatesPlugin : FlutterPlugin, MethodCallHandler, StreamHandler {
+    private lateinit var channel: MethodChannel
+    private lateinit var liveUpdateManager: LiveUpdateManager
+    // ... (payloadChannel and Companion object remain the same)
+
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "live_updates")
+        channel.setMethodCallHandler(this)
+        // ... (payloadChannel setup remains the same)
+        liveUpdateManager = LiveUpdateManager(flutterPluginBinding.applicationContext)
+        liveUpdateManager.initialize()
+    }
+
+    override fun onMethodCall(call: MethodCall, result: Result) {
+        when (call.method) {
+            "showCustomNotification" -> {
+                try {
+                    val notificationId = call.argument<Int>("notificationId")!!
+                    val title = call.argument<String>("title")!!
+                    val text = call.argument<String>("text")!!
+                    val layoutName = call.argument<String>("layoutName")!!
+                    val viewData = call.argument<Map<String, Map<String, Any>>>("viewData")!!
+                    val ongoing = call.argument<Boolean>("ongoing") ?: false
+                    val autoCancel = call.argument<Boolean>("autoCancel") ?: true
+                    val payload = call.argument<String>("payload")
+
+                    liveUpdateManager.showCustomNotification(
+                        notificationId,
+                        title,
+                        text,
+                        layoutName,
+                        viewData,
+                        ongoing,
+                        autoCancel,
+                        payload
+                    )
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("showCustomNotification_error", e.message, e.stackTraceToString())
+                }
+            }
+            "showNotification" -> {
+                // This method remains unchanged
+                try {
+                    // ... (existing code for showNotification)
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("showNotification_error", e.message, null)
+                }
+            }
+            "cancelNotification" -> {
+                // This method remains unchanged
+                try {
+                    // ... (existing code for cancelNotification)
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("cancelNotification_error", e.message, null)
+                }
+            }
+            else -> {
+                result.notImplemented()
+            }
+        }
+    }
+
+    // ... (onDetachedFromEngine and StreamHandler methods remain the same)
+}
+第 3 步：如何在 example 项目中使用
+现在，你的插件已经准备就绪。example 项目是展示其强大功能的地方。
+在 example/android/app/src/main/res/layout/ 目录下创建你的 XML 布局。
+例如，创建 caller_id_notification.xml:
+code
+Xml
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notification_container"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/avatar"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:scaleType="centerCrop" />
+
+    <TextView
+        android:id="@+id/caller_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toEndOf="@id/avatar"
+        android:layout_marginStart="8dp"
+        android:singleLine="true"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title" />
+
+    <TextView
+        android:id="@+id/caller_number"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toEndOf="@id/avatar"
+        android:layout_below="@id/caller_name"
+        android:layout_marginStart="8dp"
+        android:singleLine="true"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Info" />
+</RelativeLayout>
+在 example/lib/main.dart 中调用新的 showCustomNotification 方法。
+code
+Dart
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:live_updates/live_updates.dart';
+// 引入新的模型
+import 'package:live_updates/models/custom_notification_data.dart'; 
+
+// ...
+
+void _showMyCustomCallerId() async {
+  // 假设这是从网络或资源加载的图片
+  final avatarBytes = (await rootBundle.load('assets/my_avatar.png')).buffer.asUint8List();
+
+  await LiveUpdates.showCustomNotification(
+    notificationId: 101,
+    title: 'Incoming Call', // For status bar
+    text: 'John Appleseed', // For status bar
+    layoutName: 'caller_id_notification', // <-- 你的 XML 文件名
+    ongoing: true,
+    viewData: {
+      // Key: XML中的ID, Value: 数据模型
+      'avatar': ImageViewData(imageBytes: avatarBytes),
+      'caller_name': TextViewData(
+        text: 'John Appleseed', 
+        textColor: Colors.black, 
+        textSize: 16.0
+      ),
+      'caller_number': TextViewData(
+        text: '+1 (408) 996-1010',
+        textColor: Colors.grey[700],
+      ),
+    },
+    payload: 'user_id_123',
+  );
+}
+
+// ... 在你的按钮的 onPressed 中调用 _showMyCustomCallerId()
+这样，你就拥有了一个功能极其强大的插件：它提供了一个稳定的原生渲染引擎，而将 UI 设计的自由度完全交给了使用插件的开发者。这正是高质量、灵活插件的典范。

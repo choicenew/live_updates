@@ -1,0 +1,2080 @@
+--------------------
+File: /参考html/example/live_updates/LiveUpdateManager.kt
+--------------------
+
+package com.yours.live_updates
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.widget.RemoteViews
+import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
+import android.net.Uri
+import android.app.Person as AndroidPerson
+import android.graphics.drawable.Icon
+import android.media.session.MediaSession
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.BitmapDrawable
+import com.yours.live_updates.NotificationForegroundService
+
+class LiveUpdateManager(private val context: Context) {
+    private var plugin: LiveUpdatesPlugin? = null
+    
+    fun setPlugin(plugin: LiveUpdatesPlugin) {
+        this.plugin = plugin
+    }
+
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    companion object {
+        const val CHANNEL_ID = "live_updates_channel"
+        private const val CHANNEL_NAME = "Live Updates"
+    }
+
+    fun initialize() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT)
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    fun showCustomNotification(
+        notificationId: Int,
+        title: String,
+        text: String,
+        ongoing: Boolean,
+        autoCancel: Boolean,
+        views: List<Map<String, Any>>,
+        payload: String? = null
+    ) {
+        val remoteViews = RemoteViews(context.packageName, R.layout.custom_notification)
+
+        for (view in views) {
+            when (view["type"]) {
+                "textView" -> {
+                    val textView = RemoteViews(context.packageName, R.layout.custom_notification_text)
+                    textView.setTextViewText(R.id.custom_text, view["text"] as String)
+                    remoteViews.addView(R.id.custom_notification_container, textView)
+                }
+                "scrollingTextView" -> {
+                    val scrollingTextView = RemoteViews(context.packageName, R.layout.custom_notification_scrolling_text)
+                    scrollingTextView.setTextViewText(R.id.custom_scrolling_text, view["text"] as String)
+                    remoteViews.addView(R.id.custom_notification_container, scrollingTextView)
+                }
+                "imageView" -> {
+                    val imageView = RemoteViews(context.packageName, R.layout.custom_notification_image)
+                    val imageBytes = view["image"] as? ByteArray
+                    if (imageBytes != null) {
+                        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                        imageView.setImageViewBitmap(R.id.custom_image, bitmap)
+                        remoteViews.addView(R.id.custom_notification_container, imageView)
+                    }
+                }
+            }
+        }
+
+        // Create a pending intent for notification click with payload
+        val intent = Intent(context, context.javaClass).apply {
+            action = "com.yours.live_updates.NOTIFICATION_CLICKED"
+            putExtra("payload", payload)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setOngoing(ongoing)
+            .setAutoCancel(autoCancel)
+            .setCustomContentView(remoteViews)
+            .setContentIntent(pendingIntent)
+
+        notificationManager.notify(notificationId, builder.build())
+        
+        // Send payload to Flutter if notification is clicked
+        if (payload != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(object : android.content.BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action == "com.yours.live_updates.NOTIFICATION_CLICKED") {
+                            val receivedPayload = intent.getStringExtra("payload")
+                            plugin?.sendPayload(receivedPayload)
+                        }
+                    }
+                }, android.content.IntentFilter("com.yours.live_updates.NOTIFICATION_CLICKED"), android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(object : android.content.BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action == "com.yours.live_updates.NOTIFICATION_CLICKED") {
+                            val receivedPayload = intent.getStringExtra("payload")
+                            plugin?.sendPayload(receivedPayload)
+                        }
+                    }
+                }, android.content.IntentFilter("com.yours.live_updates.NOTIFICATION_CLICKED"))
+            }
+        }
+    }
+
+    fun showNotification(
+        title: String,
+        text: String,
+        notificationId: Int,
+        ongoing: Boolean,
+        autoCancel: Boolean,
+        subText: String?,
+        category: String?,
+        fullScreen: Boolean,
+        largeIcon: ByteArray?,
+        progress: Int?,
+        progressMax: Int?,
+        progressIndeterminate: Boolean,
+        payload: String? = null
+    ) {
+        // Create a pending intent for notification click with payload
+        val intent = Intent(context, context.javaClass).apply {
+            action = "com.yours.live_updates.NOTIFICATION_CLICKED"
+            putExtra("payload", payload)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setOngoing(ongoing)
+            .setAutoCancel(autoCancel)
+            .setContentIntent(pendingIntent)
+
+        if (subText != null) {
+            builder.setSubText(subText)
+        }
+
+        if (category != null) {
+            builder.setCategory(category)
+        }
+
+        if (largeIcon != null) {
+            val bitmap = BitmapFactory.decodeByteArray(largeIcon, 0, largeIcon.size)
+            builder.setLargeIcon(bitmap)
+        }
+
+        // Apply different styles based on category
+        when (category) {
+            "call" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // Use CallStyle for Android 12+ (API 31+)
+                    val person = androidx.core.app.Person.Builder()
+                        .setName(title)
+                        .build()
+                    
+                    val callStyle = NotificationCompat.CallStyle.forIncomingCall(
+                        person,
+                        PendingIntent.getActivity(
+                            context,
+                            notificationId + 100,
+                            Intent(context, context.javaClass).apply { action = "ANSWER_CALL" },
+                            PendingIntent.FLAG_IMMUTABLE
+                        ),
+                        PendingIntent.getActivity(
+                            context,
+                            notificationId + 200,
+                            Intent(context, context.javaClass).apply { action = "DECLINE_CALL" },
+                            PendingIntent.FLAG_IMMUTABLE
+                        )
+                    )
+                    builder.setStyle(callStyle)
+                    
+                    // Always set fullScreenIntent for CallStyle notifications to meet Android requirements
+                    val fullScreenIntent = Intent(context, context.javaClass)
+                    val fullScreenPendingIntent = PendingIntent.getActivity(
+                        context,
+                        notificationId + 300,
+                        fullScreenIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    builder.setFullScreenIntent(fullScreenPendingIntent, true)
+                    
+                    // Set high priority and category for call notifications
+                    builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+                    builder.setCategory(NotificationCompat.CATEGORY_CALL)
+                    
+                    // Start foreground service for call notifications
+                    val serviceIntent = Intent(context, NotificationForegroundService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                }
+            }
+            "progress" -> {
+                if (progress != null && progressMax != null) {
+                    builder.setProgress(progressMax, progress, progressIndeterminate)
+                    // Use BigTextStyle for progress visualization
+                     val progressStyle = NotificationCompat.BigTextStyle()
+                         .bigText(text)
+                         .setBigContentTitle(title)
+                     builder.setStyle(progressStyle)
+                }
+            }
+            else -> {
+                // Use BigTextStyle as default
+                val bigTextStyle = NotificationCompat.BigTextStyle()
+                    .bigText(text)
+                    .setBigContentTitle(title)
+                builder.setStyle(bigTextStyle)
+            }
+        }
+
+        if (fullScreen) {
+            val fullScreenIntent = Intent(context, context.javaClass)
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                context,
+                0,
+                fullScreenIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
+        }
+
+        notificationManager.notify(notificationId, builder.build())
+        
+        // Send payload to Flutter if notification is clicked
+        if (payload != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(object : android.content.BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action == "com.yours.live_updates.NOTIFICATION_CLICKED") {
+                            val receivedPayload = intent.getStringExtra("payload")
+                            plugin?.sendPayload(receivedPayload)
+                        }
+                    }
+                }, android.content.IntentFilter("com.yours.live_updates.NOTIFICATION_CLICKED"), android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(object : android.content.BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action == "com.yours.live_updates.NOTIFICATION_CLICKED") {
+                            val receivedPayload = intent.getStringExtra("payload")
+                            plugin?.sendPayload(receivedPayload)
+                        }
+                    }
+                }, android.content.IntentFilter("com.yours.live_updates.NOTIFICATION_CLICKED"))
+            }
+        }
+    }
+
+    fun cancelNotification(notificationId: Int) {
+        notificationManager.cancel(notificationId)
+    }
+}
+
+--------------------
+File: /参考html/example/live_updates/LiveUpdatesPlugin.kt
+--------------------
+
+package com.yours.live_updates
+
+import com.yours.live_updates.LiveUpdateManager
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.EventChannel.EventSink
+import io.flutter.plugin.common.EventChannel.StreamHandler
+
+/** LiveUpdatesPlugin */
+class LiveUpdatesPlugin : FlutterPlugin, MethodCallHandler, StreamHandler {
+    private lateinit var channel: MethodChannel
+    private lateinit var payloadChannel: EventChannel
+    private lateinit var liveUpdateManager: LiveUpdateManager
+    private var eventSink: EventSink? = null
+
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "live_updates")
+        channel.setMethodCallHandler(this)
+        
+        payloadChannel = EventChannel(flutterPluginBinding.binaryMessenger, "live_updates/payload")
+        payloadChannel.setStreamHandler(this)
+        
+        liveUpdateManager = LiveUpdateManager(flutterPluginBinding.applicationContext)
+        liveUpdateManager.setPlugin(this)
+        liveUpdateManager.initialize()
+    }
+
+    override fun onMethodCall(call: MethodCall, result: Result) {
+        when (call.method) {
+            "showCustomNotification" -> {
+                try {
+                    val notificationId = call.argument<Int>("notificationId") ?: 0
+                    val title = call.argument<String>("title") ?: ""
+                    val text = call.argument<String>("text") ?: ""
+                    val ongoing = call.argument<Boolean>("ongoing") ?: false
+                    val autoCancel = call.argument<Boolean>("autoCancel") ?: true
+                    val views = call.argument<List<Map<String, Any>>>("views") ?: emptyList()
+                    val payload = call.argument<String>("payload")
+
+                    liveUpdateManager.showCustomNotification(
+                        notificationId,
+                        title,
+                        text,
+                        ongoing,
+                        autoCancel,
+                        views,
+                        payload
+                    )
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("showCustomNotification_error", e.message, null)
+                }
+            }
+            "showNotification" -> {
+                try {
+                    val title = call.argument<String>("title") ?: ""
+                    val text = call.argument<String>("text") ?: ""
+                    val notificationId = call.argument<Int>("notificationId") ?: 0
+                    val ongoing = call.argument<Boolean>("ongoing") ?: false
+                    val autoCancel = call.argument<Boolean>("autoCancel") ?: true
+                    val subText = call.argument<String>("subText")
+                    val category = call.argument<String>("category")
+                    val fullScreen = call.argument<Boolean>("fullScreen") ?: false
+                    val largeIcon = call.argument<ByteArray>("largeIcon")
+                    val progress = call.argument<Int>("progress")
+                    val progressMax = call.argument<Int>("progressMax")
+                    val progressIndeterminate = call.argument<Boolean>("progressIndeterminate") ?: false
+                    val payload = call.argument<String>("payload")
+
+                    liveUpdateManager.showNotification(
+                        title,
+                        text,
+                        notificationId,
+                        ongoing,
+                        autoCancel,
+                        subText,
+                        category,
+                        fullScreen,
+                        largeIcon,
+                        progress,
+                        progressMax,
+                        progressIndeterminate,
+                        payload
+                    )
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("showNotification_error", e.message, null)
+                }
+            }
+            "cancelNotification" -> {
+                try {
+                    val notificationId = call.argument<Int>("notificationId") ?: 0
+                    liveUpdateManager.cancelNotification(notificationId)
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("cancelNotification_error", e.message, null)
+                }
+            }
+            else -> {
+                result.notImplemented()
+            }
+        }
+    }
+
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel.setMethodCallHandler(null)
+        payloadChannel.setStreamHandler(null)
+    }
+    
+    override fun onListen(arguments: Any?, events: EventSink?) {
+        eventSink = events
+    }
+    
+    override fun onCancel(arguments: Any?) {
+        eventSink = null
+    }
+    
+    fun sendPayload(payload: String?) {
+        eventSink?.success(payload)
+    }
+}
+
+
+--------------------
+File: /参考html/example/live_updates/LiveUpdatesService.kt
+--------------------
+
+
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/androidTest/java/com/r1n1os/livenotificationandroid/ExampleInstrumentedTest.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid
+
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.ext.junit.runners.AndroidJUnit4
+
+import org.junit.Test
+import org.junit.runner.RunWith
+
+import org.junit.Assert.*
+
+/**
+ * Instrumented test, which will execute on an Android device.
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+@RunWith(AndroidJUnit4::class)
+class ExampleInstrumentedTest {
+    @Test
+    fun useAppContext() {
+        // Context of the app under test.
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        assertEquals("com.r1n1os.livenotificationandroid", appContext.packageName)
+    }
+}
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/main/java/com/r1n1os/livenotificationandroid/LiveNotificationManager.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid
+
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.NotificationManager.IMPORTANCE_DEFAULT
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.annotation.RequiresApi
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.graphics.toColorInt
+
+
+object LiveNotificationManager {
+    private lateinit var notificationManager: NotificationManager
+    private lateinit var appContext: Context
+
+    const val CHANNEL_ID = "live_updates_channel_id"
+    private const val CHANNEL_NAME = "live_updates_channel_name"
+    private const val NOTIFICATION_ID = 1234
+
+    private const val FIRST_SEGMENT = 50
+    private const val SECOND_SEGMENT = 50
+    private const val THIRD_SEGMENT = 50
+    private const val FIRST_POINT = 50
+    private const val SECOND_POINT = 100
+
+    private var trackingSteps = listOf<TrackingModel>()
+
+    fun initialize(context: Context) {
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        this.notificationManager = notificationManager
+        val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, IMPORTANCE_DEFAULT)
+        appContext = context
+        this.notificationManager.createNotificationChannel(channel)
+    }
+
+    fun showSegmentLiveNotification() {
+        trackingSteps = buildTrackingModelList()
+        showNotification()
+    }
+
+    private fun buildTrackingModelList(): List<TrackingModel> {
+        return  listOf<TrackingModel>(
+            TrackingModel(
+                timeNeeded = 200,
+                builder = Notification.Builder(appContext, CHANNEL_ID).apply {
+                    setSmallIcon(R.drawable.ic_launcher_foreground)
+                    setContentTitle("Route Accepted")
+                    setContentText("Driver is on the way to you")
+                    setAutoCancel(true)
+
+                    // Building ProgressStyle for step one
+                    var progressStyle: Notification.ProgressStyle? =
+                        buildProgressStyle(
+                            0,
+                            "#28A745".toColorInt(),
+                            "#8BC598".toColorInt(),
+                            "#8BC598".toColorInt(),
+                        )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                        style = progressStyle
+                    }
+                }
+            ),
+            TrackingModel(
+                timeNeeded = 3000,
+                builder = Notification.Builder(appContext, CHANNEL_ID).apply {
+                    setSmallIcon(R.drawable.ic_launcher_foreground)
+                    setContentTitle("Driver arrived")
+                    setContentText("Driver is waiting for you")
+                    setAutoCancel(true)
+
+                    // Building ProgressStyle for step two
+                    var progressStyle: Notification.ProgressStyle? =
+                        buildProgressStyle(
+                            55,
+                            "#28A745".toColorInt(),
+                            "#28A745".toColorInt(),
+                            "#8BC598".toColorInt(),
+                        )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                        style = progressStyle
+                    }
+                }
+            ),
+            TrackingModel(
+                timeNeeded = 5000,
+                builder = Notification.Builder(appContext, CHANNEL_ID).apply {
+                    setSmallIcon(R.drawable.ic_launcher_foreground)
+                    setContentTitle("Arrived")
+                    setContentText("You have arrived at your destination")
+                    setAutoCancel(true)
+
+                    // Building ProgressStyle for step three
+                    var progressStyle: Notification.ProgressStyle? =
+                        buildProgressStyle(
+                            150,
+                            "#28A745".toColorInt(),
+                            "#28A745".toColorInt(),
+                            "#28A745".toColorInt(),
+                        )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                        style = progressStyle
+                    }
+                }
+            ),
+        )
+    }
+
+    fun showPointsLiveNotification() {
+        trackingSteps = listOf<TrackingModel>(
+            TrackingModel(
+                timeNeeded = 200,
+                builder = Notification.Builder(appContext, CHANNEL_ID).apply {
+                    setSmallIcon(R.drawable.ic_launcher_foreground)
+                    setContentTitle("Route Accepted")
+                    setContentText("Driver is on the way to you")
+
+                    // Building ProgressStyle for step one
+                    var progressStyle: Notification.ProgressStyle? =
+                        buildProgressStyle(
+                            0,
+                            "#28A745".toColorInt(),
+                            "#8BC598".toColorInt(),
+                            "#8BC598".toColorInt(),
+                            true,
+                        )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                        style = progressStyle
+                    }
+                }
+            ),
+            TrackingModel(
+                timeNeeded = 3000,
+                builder = Notification.Builder(appContext, CHANNEL_ID).apply {
+                    setSmallIcon(R.drawable.ic_launcher_foreground)
+                    setContentTitle("Driver arrived")
+                    setContentText("Driver is waiting for you")
+                    setAutoCancel(true)
+
+                    // Building ProgressStyle for step two
+                    var progressStyle: Notification.ProgressStyle? =
+                        buildProgressStyle(
+                            75,
+                            "#28A745".toColorInt(),
+                            "#28A745".toColorInt(),
+                            "#8BC598".toColorInt(),
+                            true,
+                        )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                        style = progressStyle
+                    }
+                }
+            ),
+            TrackingModel(
+                timeNeeded = 5000,
+                builder = Notification.Builder(appContext, CHANNEL_ID).apply {
+                    setSmallIcon(R.drawable.ic_launcher_foreground)
+                    setContentTitle("Arrived")
+                    setContentText("You have arrived at your destination")
+                    setAutoCancel(true)
+
+                    // Building ProgressStyle for step three
+                    var progressStyle: Notification.ProgressStyle? =
+                        buildProgressStyle(
+                            150,
+                            "#28A745".toColorInt(),
+                            "#28A745".toColorInt(),
+                            "#28A745".toColorInt(),
+                            true,
+                        )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                        style = progressStyle
+                    }
+                }
+            ),
+        )
+        showNotification()
+    }
+
+    private fun showNotification() {
+        for (trackStep in trackingSteps) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                with(NotificationManagerCompat.from(appContext)) {
+                    if (ActivityCompat.checkSelfPermission(
+                            appContext,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        return@with
+                    }
+                    notificationManager.notify(NOTIFICATION_ID, trackStep.builder.build())
+                }
+            }, trackStep.timeNeeded)
+        }
+
+    }
+
+    private fun buildProgressStyle(
+        currentProgress: Int,
+        segmentOneColor: Int,
+        segmentTwoColor: Int,
+        segmentThreeColor: Int,
+        isWithProgressPoints: Boolean = false
+    ): Notification.ProgressStyle? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            // Creating the progress segments style
+            val progressSegmentList: List<Notification.ProgressStyle.Segment> =
+                handleProgressSegment(
+                    segmentOneColor,
+                    segmentTwoColor,
+                    segmentThreeColor
+                )
+
+            Notification.ProgressStyle().apply {
+                isStyledByProgress = false
+                progress = currentProgress
+                progressSegments = progressSegmentList
+                progressStartIcon = Icon.createWithResource(
+                    appContext,
+                    R.drawable.driver
+                )
+                progressEndIcon = Icon.createWithResource(
+                    appContext,
+                    R.drawable.location_pin
+                )
+                // Creating the progress points style
+                if (isWithProgressPoints) {
+                    var progressPointList: List<Notification.ProgressStyle.Point>? = null
+                    progressPointList = handleProgressPoint(
+                        segmentTwoColor,
+                        segmentThreeColor
+                    )
+                    progressPoints = progressPointList
+                }
+            }
+        } else {
+            return null
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun handleProgressSegment(
+        segmentOneColor: Int,
+        segmentTwoColor: Int,
+        segmentThreeColor: Int,
+    ): List<Notification.ProgressStyle.Segment> {
+        return listOf(
+            Notification.ProgressStyle.Segment(FIRST_SEGMENT)
+                .setColor(segmentOneColor),
+            Notification.ProgressStyle.Segment(SECOND_SEGMENT)
+                .setColor(segmentTwoColor),
+            Notification.ProgressStyle.Segment(THIRD_SEGMENT)
+                .setColor(segmentThreeColor),
+            )
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun handleProgressPoint(
+        pointOneColor: Int,
+        pointTwoColor: Int,
+    ): List<Notification.ProgressStyle.Point> {
+        return listOf(
+            Notification.ProgressStyle.Point(FIRST_POINT)
+                .setColor(pointOneColor),
+            Notification.ProgressStyle.Point(SECOND_POINT)
+                .setColor(pointTwoColor)
+        )
+    }
+}
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/main/java/com/r1n1os/livenotificationandroid/MainActivity.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.r1n1os.livenotificationandroid.ui.theme.LiveNotificationAndroidTheme
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            LiveNotificationAndroidTheme {
+                val context = LocalContext.current
+                var hasNotificationPermission by remember {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        mutableStateOf(
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) == PackageManager.PERMISSION_GRANTED
+                        )
+                    } else {
+                        // For versions below Android 13, permission is granted by default
+                        mutableStateOf(true)
+                    }
+                }
+                // Prepare the permission launcher
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                ) {}
+
+                LaunchedEffect(key1 = true) {
+                    if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    initLiveNotification(context)
+                }
+
+
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Button(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 31.dp),
+                            onClick =  {
+                                LiveNotificationManager.showSegmentLiveNotification()
+                            }
+                        ) {
+                            Text(
+                                text = "Initialize Segment Style Live Notification"
+                            )
+                        }
+                        Button(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 31.dp),
+                            onClick =  {
+                                LiveNotificationManager.showPointsLiveNotification()
+                            }
+                        ) {
+                            Text(
+                                text = "Initialize Points Style Live Notification"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun initLiveNotification(context: Context) {
+    LiveNotificationManager.initialize(
+        context.applicationContext,
+    )
+}
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/main/java/com/r1n1os/livenotificationandroid/TrackingModel.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid
+
+import android.app.Notification
+
+data class TrackingModel(
+    val timeNeeded: Long,
+    val builder:  Notification.Builder
+)
+
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/main/java/com/r1n1os/livenotificationandroid/ui/theme/Color.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val Purple80 = Color(0xFFD0BCFF)
+val PurpleGrey80 = Color(0xFFCCC2DC)
+val Pink80 = Color(0xFFEFB8C8)
+
+val Purple40 = Color(0xFF6650a4)
+val PurpleGrey40 = Color(0xFF625b71)
+val Pink40 = Color(0xFF7D5260)
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/main/java/com/r1n1os/livenotificationandroid/ui/theme/Theme.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid.ui.theme
+
+import android.app.Activity
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+
+private val DarkColorScheme = darkColorScheme(
+    primary = Purple80,
+    secondary = PurpleGrey80,
+    tertiary = Pink80
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = Purple40,
+    secondary = PurpleGrey40,
+    tertiary = Pink40
+
+    /* Other default colors to override
+    background = Color(0xFFFFFBFE),
+    surface = Color(0xFFFFFBFE),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onTertiary = Color.White,
+    onBackground = Color(0xFF1C1B1F),
+    onSurface = Color(0xFF1C1B1F),
+    */
+)
+
+@Composable
+fun LiveNotificationAndroidTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    // Dynamic color is available on Android 12+
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
+}
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/main/java/com/r1n1os/livenotificationandroid/ui/theme/Type.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid.ui.theme
+
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+// Set of Material typography styles to start with
+val Typography = Typography(
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    )
+    /* Other default text styles to override
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    )
+    */
+)
+
+--------------------
+File: /参考html/Live-Notification-Android-main/Live-Notification-Android-main/app/src/test/java/com/r1n1os/livenotificationandroid/ExampleUnitTest.kt
+--------------------
+
+package com.r1n1os.livenotificationandroid
+
+import org.junit.Test
+
+import org.junit.Assert.*
+
+/**
+ * Example local unit test, which will execute on the development machine (host).
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+class ExampleUnitTest {
+    @Test
+    fun addition_isCorrect() {
+        assertEquals(4, 2 + 2)
+    }
+}
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/androidTest/java/com/nicos/liveupdatenotification/ExampleInstrumentedTest.kt
+--------------------
+
+package com.nicos.liveupdatenotification
+
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.ext.junit.runners.AndroidJUnit4
+
+import org.junit.Test
+import org.junit.runner.RunWith
+
+import org.junit.Assert.*
+
+/**
+ * Instrumented test, which will execute on an Android device.
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+@RunWith(AndroidJUnit4::class)
+class ExampleInstrumentedTest {
+    @Test
+    fun useAppContext() {
+        // Context of the app under test.
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        assertEquals("com.nicos.liveupdatenotification", appContext.packageName)
+    }
+}
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/firebase_service/FirebaseMessagingService.kt
+--------------------
+
+package com.nicos.liveupdatenotification.firebase_service
+
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.os.Build
+import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+import com.nicos.liveupdatenotification.BuildConfig
+import com.nicos.liveupdatenotification.R
+import org.json.JSONObject
+
+class FirebaseMessagingService : FirebaseMessagingService() {
+
+    companion object {
+        private const val CHANNEL_ID = "Firebase Channel Id"
+        private const val CHANNEL_NAME = "Firebase Channel Name"
+        private const val CHANNEL_DESCRIPTION = "Firebase Channel Description"
+    }
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+
+        if (BuildConfig.DEBUG) {
+            Log.d("payload", message.data.toString())
+        }
+
+        val notificationModel = NotificationModel(JSONObject(message.data as Map<*, *>))
+        Notification.Builder(this, CHANNEL_ID).apply {
+            setSmallIcon(R.drawable.ic_android_black_24dp)
+            setContentTitle(notificationModel.title)
+            setContentText(notificationModel.body)
+            setAutoCancel(true)
+
+            // Begin Live Update
+            var progressStyle: Notification.ProgressStyle? =
+                getAndCreateProgressStyle(notificationModel)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                setStyle(progressStyle)
+            }
+            // End of Live Update
+
+            createNotificationChannel()
+
+            with(NotificationManagerCompat.from(this@FirebaseMessagingService)) {
+                if (ActivityCompat.checkSelfPermission(
+                        this@FirebaseMessagingService,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+                notify(1, this@apply.build())
+            }
+        }
+    }
+
+    private fun getAndCreateProgressStyle(notificationModel: NotificationModel): Notification.ProgressStyle? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            // Handle the segments
+            val progressSegmentList: List<Notification.ProgressStyle.Segment> =
+                handleProgressSegment(notificationModel)
+            // Handle the points
+            val progressPointList: List<Notification.ProgressStyle.Point> =
+                handleProgressPoint(notificationModel)
+            Notification.ProgressStyle().apply {
+                setStyledByProgress(false)
+                // Set the current progress
+                setProgress(notificationModel.currentProgress ?: 0)
+                // Set the progress tracker icon
+                setProgressTrackerIcon(
+                    Icon.createWithResource(
+                        this@FirebaseMessagingService,
+                        R.drawable.ic_android_red_24dp
+                    )
+                )
+                // Set the segments
+                setProgressSegments(
+                    progressSegmentList
+                )
+                // Set the points
+                setProgressPoints(
+                    progressPointList
+                )
+            }
+        } else {
+            // TODO("VERSION.SDK_INT < BAKLAVA")
+            return null
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun handleProgressSegment(notificationModel: NotificationModel): List<Notification.ProgressStyle.Segment> {
+        if (notificationModel.currentProgressSegmentOne != null &&
+            notificationModel.currentProgressSegmentTwo != null &&
+            notificationModel.currentProgressSegmentThree != null &&
+            notificationModel.currentProgressSegmentFour != null
+        ) {
+            return listOf(
+                Notification.ProgressStyle.Segment(notificationModel.currentProgressSegmentOne)
+                    .setColor(this@FirebaseMessagingService.getColor(R.color.teal_200)),
+                Notification.ProgressStyle.Segment(notificationModel.currentProgressSegmentTwo)
+                    .setColor(this@FirebaseMessagingService.getColor(R.color.purple_200)),
+                Notification.ProgressStyle.Segment(notificationModel.currentProgressSegmentThree)
+                    .setColor(this@FirebaseMessagingService.getColor(R.color.purple_700)),
+                Notification.ProgressStyle.Segment(notificationModel.currentProgressSegmentFour)
+                    .setColor(this@FirebaseMessagingService.getColor(R.color.teal_700))
+
+            )
+        }
+
+        return emptyList()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun handleProgressPoint(notificationModel: NotificationModel): List<Notification.ProgressStyle.Point> {
+        if (notificationModel.currentProgressPointOne != null &&
+            notificationModel.currentProgressPointTwo != null &&
+            notificationModel.currentProgressPointThree != null
+        ) {
+            return listOf(
+                Notification.ProgressStyle.Point(notificationModel.currentProgressPointOne)
+                    .setColor(this@FirebaseMessagingService.getColor(android.R.color.holo_green_light)),
+                Notification.ProgressStyle.Point(notificationModel.currentProgressPointTwo)
+                    .setColor(this@FirebaseMessagingService.getColor(android.R.color.holo_green_light)),
+                Notification.ProgressStyle.Point(notificationModel.currentProgressPointThree)
+                    .setColor(this@FirebaseMessagingService.getColor(android.R.color.holo_green_light))
+            )
+        }
+        return emptyList()
+    }
+
+    private fun createNotificationChannel() {
+        val importance = NotificationManager.IMPORTANCE_DEFAULT
+        NotificationChannel(CHANNEL_ID, CHANNEL_NAME, importance).apply {
+            description = CHANNEL_DESCRIPTION
+            with((this@FirebaseMessagingService.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)) {
+                createNotificationChannel(this@apply)
+            }
+        }
+    }
+}
+
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/firebase_service/NotificationModel.kt
+--------------------
+
+package com.nicos.liveupdatenotification.firebase_service
+
+import org.json.JSONObject
+
+data class NotificationModel(
+    var title: String? = null,
+    var body: String? = null,
+    val currentProgress: Int? = null,
+    val currentProgressSegmentOne: Int? = null,
+    val currentProgressSegmentTwo: Int? = null,
+    val currentProgressSegmentThree: Int? = null,
+    val currentProgressSegmentFour: Int? = null,
+    val currentProgressPointOne: Int? = null,
+    val currentProgressPointTwo: Int? = null,
+    val currentProgressPointThree: Int? = null
+) {
+    // Parse the data
+    constructor(jsonObject: JSONObject) : this(
+        jsonObject.optString("title"),
+        jsonObject.optString("body"),
+        jsonObject.optInt("currentProgress"),
+        jsonObject.optInt("currentProgressSegmentOne"),
+        jsonObject.optInt("currentProgressSegmentTwo"),
+        jsonObject.optInt("currentProgressSegmentThree"),
+        jsonObject.optInt("currentProgressSegmentFour"),
+        jsonObject.optInt("currentProgressPointOne"),
+        jsonObject.optInt("currentProgressPointTwo"),
+        jsonObject.optInt("currentProgressPointThree")
+    )
+
+    // Empty Constructor
+    constructor() : this(
+        "",
+        "",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+    )
+}
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/local_notification/LocalNotification.kt
+--------------------
+
+package com.nicos.liveupdatenotification.local_notification
+
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Context.NOTIFICATION_SERVICE
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.os.Build
+import androidx.annotation.RequiresApi
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import com.nicos.liveupdatenotification.R
+
+class LocalNotification(private val context: Context) {
+
+    companion object {
+        private const val CHANNEL_ID = "Channel Id"
+        private const val CHANNEL_NAME = "Channel Name"
+        private const val CHANNEL_DESCRIPTION = "Channel Description"
+
+        private const val CURRENT_PROGRESS = 55
+        private const val CURRENT_PROGRESS_SEGMENT_ONE = 33
+        private const val CURRENT_PROGRESS_SEGMENT_TWO = 33
+        private const val CURRENT_PROGRESS_SEGMENT_THREE = 33
+        private const val CURRENT_PROGRESS_SEGMENT_FOUR = 33
+        private const val CURRENT_PROGRESS_POINT_ONE = 33
+        private const val CURRENT_PROGRESS_POINT_TWO = 66
+        private const val CURRENT_PROGRESS_POINT_THREE = 99
+    }
+
+    internal fun showNotification() {
+        Notification.Builder(context, CHANNEL_ID).apply {
+            setSmallIcon(R.drawable.ic_android_black_24dp)
+            setContentTitle(context.getString(R.string.local_notification_title))
+            setContentText(context.getString(R.string.local_notification_text))
+            setAutoCancel(true)
+
+            // Begin Live Update
+            var progressStyle: Notification.ProgressStyle? =
+                getAndCreateProgressStyle()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && progressStyle != null) {
+                setStyle(progressStyle)
+            }
+            // End of Live Update
+
+            createNotificationChannel()
+
+            with(NotificationManagerCompat.from(context)) {
+                if (ActivityCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+                notify(1, this@apply.build())
+            }
+        }
+    }
+
+    private fun getAndCreateProgressStyle(): Notification.ProgressStyle? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            // Handle the segments
+            val progressSegmentList: List<Notification.ProgressStyle.Segment> =
+                handleProgressSegment()
+            // Handle the points
+            val progressPointList: List<Notification.ProgressStyle.Point> =
+                handleProgressPoint()
+            // Create the progress style
+            Notification.ProgressStyle().apply {
+                setStyledByProgress(false)
+                // Set the current progress
+                setProgress(CURRENT_PROGRESS)
+                // Set the progress tracker icon
+                setProgressTrackerIcon(
+                    Icon.createWithResource(
+                        context,
+                        R.drawable.ic_android_red_24dp
+                    )
+                )
+                // Set the segments
+                setProgressSegments(
+                    progressSegmentList
+                )
+                // Set the points
+                setProgressPoints(
+                    progressPointList
+                )
+            }
+        } else {
+            // TODO("VERSION.SDK_INT < BAKLAVA")
+            return null
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun handleProgressSegment(): List<Notification.ProgressStyle.Segment> {
+        return listOf(
+            Notification.ProgressStyle.Segment(CURRENT_PROGRESS_SEGMENT_ONE)
+                .setColor(context.getColor(R.color.teal_200)),
+            Notification.ProgressStyle.Segment(CURRENT_PROGRESS_SEGMENT_TWO)
+                .setColor(context.getColor(R.color.purple_200)),
+            Notification.ProgressStyle.Segment(CURRENT_PROGRESS_SEGMENT_THREE)
+                .setColor(context.getColor(R.color.purple_700)),
+            Notification.ProgressStyle.Segment(CURRENT_PROGRESS_SEGMENT_FOUR)
+                .setColor(context.getColor(R.color.teal_700))
+
+        )
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    private fun handleProgressPoint(): List<Notification.ProgressStyle.Point> {
+        return listOf(
+            Notification.ProgressStyle.Point(CURRENT_PROGRESS_POINT_ONE)
+                .setColor(context.getColor(android.R.color.holo_green_light)),
+            Notification.ProgressStyle.Point(CURRENT_PROGRESS_POINT_TWO)
+                .setColor(context.getColor(android.R.color.holo_green_light)),
+            Notification.ProgressStyle.Point(CURRENT_PROGRESS_POINT_THREE)
+                .setColor(context.getColor(android.R.color.holo_green_light))
+        )
+    }
+
+    private fun createNotificationChannel() {
+        val importance = NotificationManager.IMPORTANCE_DEFAULT
+        NotificationChannel(CHANNEL_ID, CHANNEL_NAME, importance).apply {
+            description = CHANNEL_DESCRIPTION
+            with((context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)) {
+                createNotificationChannel(this@apply)
+            }
+        }
+    }
+}
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/MainActivity.kt
+--------------------
+
+package com.nicos.liveupdatenotification
+
+import android.Manifest
+import android.os.Build
+import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import com.google.android.gms.tasks.OnCompleteListener
+import com.google.firebase.messaging.FirebaseMessaging
+import com.nicos.liveupdatenotification.local_notification.LocalNotification
+import com.nicos.liveupdatenotification.ui.theme.LiveUpdateNotificationTheme
+
+class MainActivity : ComponentActivity() {
+
+    private lateinit var localNotification: LocalNotification
+
+    private val requestPermissionLauncherForRemoteNotification =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                if (BuildConfig.DEBUG) {
+                    Log.d("PERMISSION_REQUEST", "POST_NOTIFICATIONS permission granted.")
+                }
+                getFCMToken()
+            } else {
+                if (BuildConfig.DEBUG) {
+                    Log.w("PERMISSION_REQUEST", "POST_NOTIFICATIONS permission denied.")
+                }
+                Toast.makeText(
+                    this,
+                    getString(R.string.notification_permission_denied_some_features_might_be_unavailable),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
+    private val requestPermissionLauncherForLocalNotification =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                if (BuildConfig.DEBUG) {
+                    Log.d("PERMISSION_REQUEST", "POST_NOTIFICATIONS permission granted.")
+                }
+                localNotification.showNotification()
+            } else {
+                if (BuildConfig.DEBUG) {
+                    Log.w("PERMISSION_REQUEST", "POST_NOTIFICATIONS permission denied.")
+                }
+                Toast.makeText(
+                    this,
+                    getString(R.string.notification_permission_denied_some_features_might_be_unavailable),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        localNotification = LocalNotification(this)
+        setContent {
+            val shouldRequestPermission =
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !shouldShowRequestPermissionRationale(
+                    Manifest.permission.POST_NOTIFICATIONS
+                )
+            LiveUpdateNotificationTheme {
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    MainUi(
+                        modifier = Modifier.padding(innerPadding),
+                        fcmNotificationClicked = {
+                            if (shouldRequestPermission) {
+                                requestPermissionLauncherForRemoteNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                getFCMToken()
+                            }
+                        },
+                        localNotificationClicked = {
+                            if (shouldRequestPermission) {
+                                requestPermissionLauncherForLocalNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                localNotification.showNotification()
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+
+    private fun getFCMToken() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener(OnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                if (BuildConfig.DEBUG) {
+                    Log.w("FCM_TOKEN", "Fetching FCM registration token failed", task.exception)
+                }
+                return@OnCompleteListener
+            }
+
+            // Get new FCM registration token
+            val token = task.result
+
+            // Log and use your token
+            if (BuildConfig.DEBUG) {
+                Log.d("FCM_TOKEN", "FCM Registration Token: $token")
+            }
+        })
+    }
+}
+
+@Composable
+fun MainUi(
+    modifier: Modifier = Modifier,
+    fcmNotificationClicked: () -> Unit,
+    localNotificationClicked: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Button(
+            onClick = fcmNotificationClicked
+        ) {
+            Text(stringResource(R.string.get_fcm_token))
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = localNotificationClicked
+        ) {
+            Text(stringResource(R.string.sent_local_notification))
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun GreetingPreview() {
+    LiveUpdateNotificationTheme {
+        MainUi(
+            fcmNotificationClicked = {},
+            localNotificationClicked = {}
+        )
+    }
+}
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/ui/theme/Color.kt
+--------------------
+
+package com.nicos.liveupdatenotification.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val Purple80 = Color(0xFFD0BCFF)
+val PurpleGrey80 = Color(0xFFCCC2DC)
+val Pink80 = Color(0xFFEFB8C8)
+
+val Purple40 = Color(0xFF6650a4)
+val PurpleGrey40 = Color(0xFF625b71)
+val Pink40 = Color(0xFF7D5260)
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/ui/theme/Theme.kt
+--------------------
+
+package com.nicos.liveupdatenotification.ui.theme
+
+import android.app.Activity
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+
+private val DarkColorScheme = darkColorScheme(
+    primary = Purple80,
+    secondary = PurpleGrey80,
+    tertiary = Pink80
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = Purple40,
+    secondary = PurpleGrey40,
+    tertiary = Pink40
+
+    /* Other default colors to override
+    background = Color(0xFFFFFBFE),
+    surface = Color(0xFFFFFBFE),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onTertiary = Color.White,
+    onBackground = Color(0xFF1C1B1F),
+    onSurface = Color(0xFF1C1B1F),
+    */
+)
+
+@Composable
+fun LiveUpdateNotificationTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    // Dynamic color is available on Android 12+
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
+}
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/main/java/com/nicos/liveupdatenotification/ui/theme/Type.kt
+--------------------
+
+package com.nicos.liveupdatenotification.ui.theme
+
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+// Set of Material typography styles to start with
+val Typography = Typography(
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    )
+    /* Other default text styles to override
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    )
+    */
+)
+
+--------------------
+File: /参考html/Live_Update_Notifcation_Android-main/Live_Update_Notifcation_Android-main/app/src/test/java/com/nicos/liveupdatenotification/ExampleUnitTest.kt
+--------------------
+
+package com.nicos.liveupdatenotification
+
+import org.junit.Test
+
+import org.junit.Assert.*
+
+/**
+ * Example local unit test, which will execute on the development machine (host).
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+class ExampleUnitTest {
+    @Test
+    fun addition_isCorrect() {
+        assertEquals(4, 2 + 2)
+    }
+}
+
+--------------------
+File: /参考html/src/main/java/com/example/platform/ui/live_updates/LiveUpdateSample.kt
+--------------------
+
+/*
+ * Copyright 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.example.platform.ui.live_updates
+
+import android.annotation.SuppressLint
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
+import androidx.annotation.RequiresApi
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.shouldShowRationale
+import kotlinx.coroutines.launch
+
+@RequiresApi(Build.VERSION_CODES.BAKLAVA)
+@Composable
+fun LiveUpdateSample() {
+    val notificationManager =
+        LocalContext.current.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    SnackbarNotificationManager.initialize(LocalContext.current.applicationContext, notificationManager)
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
+        },
+    ) { contentPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+        ) {
+            Text(stringResource( R.string.live_update_summary_text))
+            Spacer(modifier = Modifier.height(4.dp))
+            NotificationPermission()
+            Button(onClick = {
+                onCheckout()
+                scope.launch {
+                    snackbarHostState.showSnackbar("Order placed")
+                }
+            }) {
+                Text("Checkout")
+            }
+        }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.BAKLAVA)
+fun onCheckout() {
+    SnackbarNotificationManager.start()
+}
+
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun NotificationPermission() {
+    @SuppressLint("InlinedApi") // Granted at install time on API <33.
+    val notificationPermissionState = rememberPermissionState(
+        android.Manifest.permission.POST_NOTIFICATIONS,
+    )
+    if (!notificationPermissionState.status.isGranted) {
+        NotificationPermissionCard(
+            shouldShowRationale = notificationPermissionState.status.shouldShowRationale,
+            onGrantClick = {
+                notificationPermissionState.launchPermissionRequest()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun NotificationPermissionCard(
+    shouldShowRationale: Boolean,
+    onGrantClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+    ) {
+        Text(
+            text = stringResource(R.string.permission_message),
+            modifier = Modifier.padding(16.dp),
+        )
+        if (shouldShowRationale) {
+            Text(
+                text = stringResource(R.string.permission_rationale),
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+           Button(onClick = onGrantClick) {
+                Text(text = stringResource(R.string.permission_grant))
+            }
+        }
+    }
+}
+
+--------------------
+File: /参考html/src/main/java/com/example/platform/ui/live_updates/SnackbarNotificationManager.kt
+--------------------
+
+/*
+ * Copyright 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.example.platform.ui.live_updates
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.NotificationManager.IMPORTANCE_DEFAULT
+import android.content.Context
+import androidx.core.app.NotificationCompat.ProgressStyle
+import android.graphics.Color
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.annotation.RequiresApi
+import androidx.core.app.NotificationCompat
+import androidx.core.graphics.drawable.IconCompat
+import java.util.logging.Level
+import java.util.logging.Logger
+
+object SnackbarNotificationManager {
+    private lateinit var notificationManager: NotificationManager
+    private lateinit var appContext: Context
+    const val CHANNEL_ID = "live_updates_channel_id"
+    private const val CHANNEL_NAME = "live_updates_channel_name"
+    private const val NOTIFICATION_ID = 1234
+
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun initialize(context: Context, notifManager: NotificationManager) {
+        notificationManager = notifManager
+        val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, IMPORTANCE_DEFAULT)
+        appContext = context
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    private enum class OrderState(val delay: Long) {
+        INITIALIZING(5000) {
+            @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+            override fun buildNotification(): NotificationCompat.Builder {
+                return buildBaseNotification(appContext, INITIALIZING)
+                    .setSmallIcon(R.drawable.ic_launcher_foreground)
+                    .setContentTitle("You order is being placed")
+                    .setContentText("Confirming with bakery...")
+                    .setStyle(buildBaseProgressStyle(INITIALIZING).setProgressIndeterminate(true))
+            }
+        },
+        FOOD_PREPARATION(9000) {
+            @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+            override fun buildNotification(): NotificationCompat.Builder {
+                return buildBaseNotification(appContext, FOOD_PREPARATION)
+                    .setContentTitle("Your order is being prepared")
+                    .setContentText("Next step will be delivery")
+                    .setLargeIcon(
+                        IconCompat.createWithResource(
+                            appContext, R.drawable.cupcake
+                        ).toIcon(appContext)
+                    )
+                    .setStyle(buildBaseProgressStyle(FOOD_PREPARATION).setProgress(25))
+            }
+        },
+        FOOD_ENROUTE(13000) {
+            @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+            override fun buildNotification(): NotificationCompat.Builder {
+                return buildBaseNotification(appContext, FOOD_ENROUTE)
+                    .setContentTitle("Your order is on its way")
+                    .setContentText("Enroute to destination")
+                    .setStyle(
+                        buildBaseProgressStyle(FOOD_ENROUTE)
+                            .setProgressTrackerIcon(
+                                IconCompat.createWithResource(
+                                    appContext, R.drawable.shopping_bag
+                                )
+                            )
+                            .setProgress(50)
+                    )
+                    .setLargeIcon(
+                        IconCompat.createWithResource(
+                            appContext, R.drawable.cupcake
+                        ).toIcon(appContext)
+                    )
+            }
+        },
+        FOOD_ARRIVING(18000) {
+            @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+            override fun buildNotification(): NotificationCompat.Builder {
+                return buildBaseNotification(appContext, FOOD_ARRIVING)
+                    .setContentTitle("Your order is arriving and has been dropped off")
+                    .setContentText("Enjoy & don't forget to refrigerate any perishable items.")
+                    .setStyle(
+                        buildBaseProgressStyle(FOOD_ARRIVING)
+                            .setProgressTrackerIcon(
+                                IconCompat.createWithResource(
+                                    appContext, R.drawable.delivery_truck
+                                )
+                            )
+                            .setProgress(75)
+                    )
+                    .setLargeIcon(
+                        IconCompat.createWithResource(
+                            appContext, R.drawable.cupcake
+                        ).toIcon(appContext)
+                    )
+            }
+        },
+        ORDER_COMPLETE(21000) {
+            @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+            override fun buildNotification(): NotificationCompat.Builder {
+                return buildBaseNotification(appContext, ORDER_COMPLETE)
+                    .setContentTitle("Your order is complete.")
+                    .setContentText("Thank you for using JetSnack for your snacking needs.")
+                    .setStyle(
+                        buildBaseProgressStyle(ORDER_COMPLETE)
+                            .setProgressTrackerIcon(
+                                IconCompat.createWithResource(
+                                    appContext, R.drawable.check_circle
+                                )
+                            )
+                            .setProgress(100)
+                    )
+                    .setLargeIcon(
+                        IconCompat.createWithResource(
+                            appContext, R.drawable.cupcake
+                        ).toIcon(appContext)
+                    )
+            }
+        };
+
+
+        @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+        fun buildBaseProgressStyle(orderState: OrderState): ProgressStyle {
+            val pointColor = Color.valueOf(236f, 183f, 255f, 1f).toArgb()
+            val segmentColor = Color.valueOf(134f, 247f, 250f, 1f).toArgb()
+            var progressStyle = NotificationCompat.ProgressStyle()
+                .setProgressPoints(
+                    listOf(
+                        ProgressStyle.Point(25).setColor(pointColor),
+                        ProgressStyle.Point(50).setColor(pointColor),
+                        ProgressStyle.Point(75).setColor(pointColor),
+                        ProgressStyle.Point(100).setColor(pointColor)
+                    )
+                ).setProgressSegments(
+                    listOf(
+                        ProgressStyle.Segment(25).setColor(segmentColor),
+                        ProgressStyle.Segment(25).setColor(segmentColor),
+                        ProgressStyle.Segment(25).setColor(segmentColor),
+                        ProgressStyle.Segment(25).setColor(segmentColor)
+
+                    )
+                )
+            when (orderState) {
+                INITIALIZING -> {}
+                FOOD_PREPARATION -> {}
+                FOOD_ENROUTE -> progressStyle.setProgressPoints(
+                    listOf(
+                        ProgressStyle.Point(25).setColor(pointColor)
+                    )
+                )
+
+                FOOD_ARRIVING -> progressStyle.setProgressPoints(
+                    listOf(
+                        ProgressStyle.Point(25).setColor(pointColor),
+                        ProgressStyle.Point(50).setColor(pointColor)
+                    )
+                )
+
+                ORDER_COMPLETE -> progressStyle.setProgressPoints(
+                    listOf(
+                        ProgressStyle.Point(25).setColor(pointColor),
+                        ProgressStyle.Point(50).setColor(pointColor),
+                        ProgressStyle.Point(75).setColor(pointColor)
+                    )
+                )
+            }
+            return progressStyle
+        }
+
+        @RequiresApi(Build.VERSION_CODES.O)
+        fun buildBaseNotification(appContext: Context, orderState: OrderState): NotificationCompat.Builder {
+            val notificationBuilder = NotificationCompat.Builder(appContext, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setOngoing(true)
+                .setRequestPromotedOngoing(true)
+
+            when (orderState) {
+                INITIALIZING -> {}
+                FOOD_PREPARATION -> {}
+                FOOD_ENROUTE -> {}
+                FOOD_ARRIVING ->
+                    notificationBuilder
+                        .addAction(
+                            NotificationCompat.Action.Builder(null, "Got it", null).build()
+                        )
+                        .addAction(
+                            NotificationCompat.Action.Builder(null, "Tip", null).build()
+                        )
+                ORDER_COMPLETE ->
+                    notificationBuilder
+                        .addAction(
+                            NotificationCompat.Action.Builder(
+                                null, "Rate delivery", null).build()
+                        )
+            }
+            return notificationBuilder
+        }
+
+        abstract fun buildNotification(): NotificationCompat.Builder
+    }
+
+    @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+    fun start() {
+        for (state in OrderState.entries) {
+            val notification = state.buildNotification().build()
+
+            Logger.getLogger("canPostPromotedNotifications")
+                .log(
+                    Level.INFO,
+                    notificationManager.canPostPromotedNotifications().toString())
+            Logger.getLogger("hasPromotableCharacteristics")
+                .log(
+                    Level.INFO,
+                    notification.hasPromotableCharacteristics().toString())
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                notificationManager.notify(NOTIFICATION_ID, notification)
+            }, state.delay)
+        }
+    }
+}
+
+

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Live Update Notification Preview</title>
+<style>
+  body {
+    font-family: 'Roboto', sans-serif;
+    background-color: #f0f2f5;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    color: #333;
+    padding: 20px;
+  }
+  .container {
+    max-width: 600px;
+    text-align: center;
+  }
+  .notification-shade {
+    width: 380px;
+    background-color: #e0e0e0;
+    border-radius: 24px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    margin: 0 auto 20px auto;
+  }
+  .notification {
+    background-color: #ffffff;
+    border-radius: 16px;
+    padding: 12px;
+    display: flex;
+    align-items: flex-start;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: left;
+    position: relative;
+  }
+  .icon {
+    width: 40px;
+    height: 40px;
+    margin-right: 12px;
+    background-color: #4285F4; /* Google Blue */
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+  .content {
+    flex-grow: 1;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #5f6368;
+  }
+  .app-name {
+    font-weight: 500;
+  }
+  .title {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1f1f1f;
+    margin-top: 4px;
+  }
+  .text {
+    font-size: 14px;
+    color: #3c4043;
+  }
+  /* Custom View Styles */
+  .custom-views-container {
+    margin-top: 8px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 8px;
+  }
+  .custom-text-view {
+    font-size: 14px;
+    color: #3c4043;
+    margin-bottom: 4px;
+  }
+  .scrolling-text-view {
+    font-size: 14px;
+    color: #3c4043;
+    white-space: nowrap;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .scrolling-text-view span {
+      display: inline-block;
+      padding-left: 100%;
+      animation: scroll-left 10s linear infinite;
+  }
+  @keyframes scroll-left {
+      0% {
+          transform: translateX(0);
+      }
+      100% {
+          transform: translateX(-100%);
+      }
+  }
+  .custom-image-view {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin-top: 8px;
+  }
+  .info-box {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #f8f9fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      text-align: left;
+  }
+  .info-box h3 {
+      margin-top: 0;
+      font-size: 16px;
+      color: #1f1f1f;
+  }
+  .info-box p {
+      font-size: 14px;
+      margin-bottom: 5px;
+  }
+  .info-box ul {
+      padding-left: 20px;
+  }
+  .info-box li {
+      margin-bottom: 8px;
+  }
+  code {
+    background-color: #eee;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="container">
+    <h2>Live Update Notification UI Preview</h2>
+
+    <!-- Standard Notification -->
+    <h3>Standard Notification</h3>
+    <div class="notification-shade">
+      <div class="notification">
+        <div class="icon">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#FFFFFF"><path d="M0 0h24v24H0V0z" fill="none"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+        </div>
+        <div class="content">
+          <div class="header">
+            <span class="app-name">Your App Name</span>
+            <span>now</span>
+          </div>
+          <div class="title">Standard Title</div>
+          <div class="text">This is the standard text content.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Custom Notification -->
+    <h3>Custom Notification</h3>
+    <div class="notification-shade">
+        <div class="notification">
+            <div class="icon">
+              <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#FFFFFF"><path d="M0 0h24v24H0V0z" fill="none"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+            </div>
+            <div class="content">
+                <div class="header">
+                    <span class="app-name">Your App Name</span>
+                    <span>now</span>
+                </div>
+                <div class="title">Custom Layout Title</div>
+                <div class="text">This is the base text for the custom notification.</div>
+                <div class="custom-views-container">
+                    <div class="custom-text-view">This is a custom TextView.</div>
+                    <div class="scrolling-text-view"><span>This is a custom ScrollingTextView that will marquee if it's too long.</span></div>
+                    <img src="https://via.placeholder.com/300x80.png?text=Custom+ImageView" alt="Custom Image" class="custom-image-view">
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="info-box">
+        <h3><code>showNotification</code> (Standard)</h3>
+        <p>This method displays a standard Android notification using the parameters you provide.</p>
+        <ul>
+            <li><b>title, text:</b> The main title and content text of the notification.</li>
+            <li><b>ongoing:</b> If <code>true</code>, the notification cannot be dismissed by the user.</li>
+            <li><b>autoCancel:</b> If <code>true</code>, the notification is cancelled when the user taps it.</li>
+        </ul>
+        <h3><code>showCustomNotification</code> (New)</h3>
+        <p>This new method allows you to build a notification with a custom layout by providing a list of view objects.</p>
+        <ul>
+            <li><b>title, text:</b> These still provide the base title and content for the notification, visible in the standard header.</li>
+            <li><b>views:</b> A <code>List&lt;LiveUpdateView&gt;</code> that defines the custom layout. The plugin currently supports:
+                <ul>
+                    <li><code>LiveUpdateTextView(text: '...')</code>: Adds a simple line of text.</li>
+                    <li><code>LiveUpdateScrollingTextView(text: '...')</code>: Adds a line of text that will automatically scroll horizontally (marquee) if it exceeds the notification width.</li>
+                    <li><code>LiveUpdateImageView(imageProvider: ...)</code>: Adds an image from a Flutter <code>ImageProvider</code>.</li>
+                </ul>
+            </li>
+        </ul>
+        <p><strong>Note:</strong> The final appearance of notifications can vary across different Android versions and device manufacturers. This preview is a close approximation.</p>
+    </div>
+  </div>
+
+</body>
+</html>
