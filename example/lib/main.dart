@@ -5,16 +5,23 @@ import 'package:live_updates_example/customization_screen.dart';
 import 'package:live_updates_example/notification_style.dart';
 import 'caller_id_page.dart';
 import 'download_page.dart';
+import 'test_page.dart';
 
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   LiveUpdates.initialize(
     onNotificationTapped: (payload) {
       if (payload != null && payload.isNotEmpty) {
-        final snackBar = SnackBar(content: Text('Callback received payload: $payload'));
-        scaffoldMessengerKey.currentState?.showSnackBar(snackBar);
+        scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text('Callback received payload: $payload')),
+        );
+        // Navigate to TestPage
+        Navigator.of(scaffoldMessengerKey.currentContext!).push(
+          MaterialPageRoute(builder: (_) => TestPage(payload: payload)),
+        );
       }
     },
   );
@@ -28,6 +35,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       scaffoldMessengerKey: scaffoldMessengerKey,
+      navigatorKey: navigatorKey,
       home: const HomePage(),
     );
   }
@@ -50,8 +58,13 @@ class _HomePageState extends State<HomePage> {
     // 监听通知点击事件 (Stream 方式 - 依然可用)
     LiveUpdates.notificationPayloadStream.listen((payload) {
       if (mounted && payload != null && payload.isNotEmpty) {
-        final snackBar = SnackBar(content: Text('Stream received payload: $payload'));
-        ScaffoldMessenger.of(context).showSnackBar(snackBar);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Stream received payload: $payload')),
+        );
+        // Navigate to TestPage
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(builder: (_) => TestPage(payload: payload)),
+        );
       }
     });
   }
