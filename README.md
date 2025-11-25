@@ -106,7 +106,52 @@ Notifications require a small icon. Place your icon file (e.g., `ic_notification
 
 ## Usage
 
-### 1. Import the Plugin
+### 1. Initialize the Plugin (Recommended)
+
+Before using any other methods, it's recommended to initialize the plugin. This allows you to register a global callback for notification tap events, which is a simpler way to handle taps.
+
+Call `LiveUpdates.initialize` early in your app's lifecycle, for example, in your `main` function:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:live_updates/live_updates.dart';
+
+// It's good practice to have a global key for showing Snackbars or dialogs from the callback.
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize the plugin and set up the tap callback
+  LiveUpdates.initialize(
+    onNotificationTapped: (payload) {
+      print('Notification tapped with payload: $payload');
+      // You can implement navigation or other logic here.
+      // For example, show a SnackBar:
+      if (payload != null && payload.isNotEmpty) {
+        final snackBar = SnackBar(content: Text('Callback received payload: $payload'));
+        scaffoldMessengerKey.currentState?.showSnackBar(snackBar);
+      }
+    },
+  );
+
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      scaffoldMessengerKey: scaffoldMessengerKey, // Assign the key
+      home: const HomePage(),
+    );
+  }
+}
+```
+
+### 2. Import the Plugin
 
 ```dart
 import 'package:live_updates/live_updates.dart';
@@ -114,20 +159,35 @@ import 'package:live_updates/models/custom_view_data.dart'; // If using custom l
 import 'package:live_updates/models/live_update_progress_data.dart'; // If using progress segments
 ```
 
-### 2. Listen for Notification Tap Events (Optional)
+### 3. Handling Notification Taps: Callback vs. Stream
 
-You can listen for `payload` data passed when the user taps on a notification via `notificationPayloadStream`:
+The plugin offers two ways to handle notification tap events. You can choose the one that best fits your app's architecture.
+
+**A) `onNotificationTapped` Callback (Simple & Recommended)**
+
+- **Best for**: Simple, direct actions like navigating to a page.
+- **How it works**: The callback you provide to `LiveUpdates.initialize` is invoked once per tap.
+- **Setup**: As shown in the initialization step above.
+
+**B) `notificationPayloadStream` (Flexible & Advanced)**
+
+- **Best for**: Complex scenarios where multiple parts of your app need to react to a tap event, or if you are using a reactive programming architecture (e.g., with BLoC or Riverpod).
+- **How it works**: The stream emits the `payload` whenever a notification is tapped. You can have multiple listeners subscribed to this stream.
+- **Setup**: You can listen to the stream anywhere in your app, for example, in a widget's `initState`:
 
 ```dart
+// Listen for notification tap events via the stream
 LiveUpdates.notificationPayloadStream.listen((payload) {
   if (payload != null && payload.isNotEmpty) {
-    // Handle payload, e.g., navigate to a specific page
-    print('Received payload: $payload');
+    // Handle payload, e.g., update state or show a dialog
+    print('Stream received payload: $payload');
   }
 });
 ```
 
-### 3. Display Standard Notifications (`showNotification`)
+> **Note**: If you set up both, both the callback and the stream will receive the event when a notification is tapped.
+
+### 4. Display Standard Notifications (`showNotification`)
 
 This method is used to display native Android notifications that can be promoted to "Live Activities" by the system.
 
@@ -165,7 +225,7 @@ LiveUpdates.showNotification(
 );
 ```
 
-### 4. Display Custom Layout Notifications (`showLayoutNotification`)
+### 5. Display Custom Layout Notifications (`showLayoutNotification`)
 
 This method is used to display notifications defined using XML layout files. These are typically high-priority heads-up notifications.
 
@@ -223,7 +283,7 @@ LiveUpdates.showLayoutNotification(
 *   `VisibilityData`: Used to control the visibility of any view.
 *   `MarqueeTextViewData`: Used to update a `TextView` that scrolls automatically.
 
-### 5. Cancel Notification
+### 6. Cancel Notification
 
 ```dart
 LiveUpdates.cancelNotification(1); // Cancel notification with ID 1

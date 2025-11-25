@@ -6,15 +6,29 @@ import 'package:live_updates_example/notification_style.dart';
 import 'caller_id_page.dart';
 import 'download_page.dart';
 
-void main() => runApp(const MyApp());
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  LiveUpdates.initialize(
+    onNotificationTapped: (payload) {
+      if (payload != null && payload.isNotEmpty) {
+        final snackBar = SnackBar(content: Text('Callback received payload: $payload'));
+        scaffoldMessengerKey.currentState?.showSnackBar(snackBar);
+      }
+    },
+  );
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: HomePage(),
+    return MaterialApp(
+      scaffoldMessengerKey: scaffoldMessengerKey,
+      home: const HomePage(),
     );
   }
 }
@@ -33,10 +47,10 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // 监听通知点击事件 (可选)
+    // 监听通知点击事件 (Stream 方式 - 依然可用)
     LiveUpdates.notificationPayloadStream.listen((payload) {
       if (mounted && payload != null && payload.isNotEmpty) {
-        final snackBar = SnackBar(content: Text('Received payload: $payload'));
+        final snackBar = SnackBar(content: Text('Stream received payload: $payload'));
         ScaffoldMessenger.of(context).showSnackBar(snackBar);
       }
     });

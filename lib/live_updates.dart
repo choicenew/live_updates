@@ -4,11 +4,33 @@ import 'package:flutter/services.dart';
 import 'package:live_updates/models/custom_view_data.dart';
 import 'package:live_updates/models/live_update_progress_data.dart';
 
+typedef NotificationTapCallback = void Function(String? payload);
+
 class LiveUpdates {
   static const MethodChannel _channel = MethodChannel('live_updates');
   static const EventChannel _payloadChannel = EventChannel('live_updates/payload');
 
   static Stream<String?>? _notificationPayloadStream;
+
+  static NotificationTapCallback? _onNotificationTapped;
+
+  static Future<void> initialize({
+    NotificationTapCallback? onNotificationTapped,
+  }) async {
+    _onNotificationTapped = onNotificationTapped;
+    _channel.setMethodCallHandler(_handleMethod);
+  }
+
+  static Future<dynamic> _handleMethod(MethodCall call) async {
+    switch (call.method) {
+      case 'onNotificationTapped':
+        final payload = call.arguments as String?;
+        _onNotificationTapped?.call(payload);
+        break;
+      default:
+        throw UnsupportedError('Unknown method ${call.method}');
+    }
+  }
 
   static Stream<String?> get notificationPayloadStream {
     _notificationPayloadStream ??= _payloadChannel.receiveBroadcastStream().cast<String?>();

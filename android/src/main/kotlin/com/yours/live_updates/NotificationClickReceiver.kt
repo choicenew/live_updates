@@ -8,8 +8,11 @@ class NotificationClickReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val payload = intent.getStringExtra("payload")
         
-        // 通过静态方法将 payload 发送回 Flutter
+        // 通过静态方法将 payload 发送回 Flutter (Stream 方式)
         LiveUpdatesPlugin.sendPayload(payload)
+
+        // 通过 MethodChannel 直接调用 Dart 回调 (Callback 方式)
+        LiveUpdatesPlugin.onNotificationTapped(payload)
 
         // 照常启动 App
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -20,3 +23,4 @@ class NotificationClickReceiver : BroadcastReceiver() {
         }
     }
 }
+

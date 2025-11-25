@@ -102,7 +102,52 @@ dependencies:
 
 ## 使用方法
 
-### 1. 导入插件
+### 1. 初始化插件 (推荐)
+
+在使用任何其他方法之前，建议先初始化插件。这允许您为通知点击事件注册一个全局回调，这是一种更简单的处理点击事件的方式。
+
+在您应用的生命周期早期调用 `LiveUpdates.initialize`，例如，在您的 `main` 函数中：
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:live_updates/live_updates.dart';
+
+// 准备一个全局的 GlobalKey，以便在回调中显示 SnackBar 或对话框
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化插件并设置点击回调
+  LiveUpdates.initialize(
+    onNotificationTapped: (payload) {
+      print('通知被点击，payload: $payload');
+      // 在这里实现导航或其他逻辑
+      // 例如，显示一个 SnackBar：
+      if (payload != null && payload.isNotEmpty) {
+        final snackBar = SnackBar(content: Text('回调收到 payload: $payload'));
+        scaffoldMessengerKey.currentState?.showSnackBar(snackBar);
+      }
+    },
+  );
+
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      scaffoldMessengerKey: scaffoldMessengerKey, // 分配 key
+      home: const HomePage(),
+    );
+  }
+}
+```
+
+### 2. 导入插件
 
 ```dart
 import 'package:live_updates/live_updates.dart';
@@ -110,20 +155,35 @@ import 'package:live_updates/models/custom_view_data.dart'; // 如果使用自�
 import 'package:live_updates/models/live_update_progress_data.dart'; // 如果使用进度条分段
 ```
 
-### 2. 监听通知点击事件 (可选)
+### 3. 处理通知点击：回调 (Callback) vs. 流 (Stream)
 
-您可以通过 `notificationPayloadStream` 监听用户点击通知时传递的 `payload` 数据：
+本插件提供两种方式来处理通知点击事件。您可以选择最适合您应用架构的方式。
+
+**A) `onNotificationTapped` 回调 (简单 & 推荐)**
+
+- **最适合**：简单、直接的操作，如导航到某个页面。
+- **工作原理**：您提供给 `LiveUpdates.initialize` 的回调函数会在每次点击时被调用一次。
+- **如何设置**：如上面的初始化步骤所示。
+
+**B) `notificationPayloadStream` 流 (灵活 & 高级)**
+
+- **最适合**：复杂的场景，例如应用的多个部分需要对同一次点击事件做出反应，或者您正在使用响应式编程架构（例如 BLoC 或 Riverpod）。
+- **工作原理**：每当通知被点击时，该流会发出 `payload`。您可以有多个监听者订阅此流。
+- **如何设置**：您可以在应用的任何地方监听此流，例如，在某个 widget 的 `initState` 中：
 
 ```dart
+// 通过 Stream 监听通知点击事件
 LiveUpdates.notificationPayloadStream.listen((payload) {
   if (payload != null && payload.isNotEmpty) {
-    // 处理 payload，例如导航到特定页面
-    print('Received payload: $payload');
+    // 处理 payload，例如更新状态或显示对话框
+    print('Stream 收到 payload: $payload');
   }
 });
 ```
 
-### 3. 显示标准通知 (`showNotification`)
+> **注意**：如果您同时设置了两者，那么当通知被点击时，回调和流都会收到事件。
+
+### 4. 显示标准通知 (`showNotification`)
 
 此方法用于显示 Android 原生通知，可以被系统提升为“实时活动”。
 
@@ -161,7 +221,7 @@ LiveUpdates.showNotification(
 );
 ```
 
-### 4. 显示自定义布局通知 (`showLayoutNotification`)
+### 5. 显示自定义布局通知 (`showLayoutNotification`)
 
 此方法用于显示使用 XML 布局文件定义的通知。这些通常是高优先级的浮动通知。
 
@@ -219,7 +279,7 @@ LiveUpdates.showLayoutNotification(
 *   `VisibilityData`：用于控制任何视图的可见性。
 *   `MarqueeTextViewData`: 用于更新一个强制滚动的 `TextView`。
 
-### 5. 取消通知
+### 6. 取消通知
 
 ```dart
 LiveUpdates.cancelNotification(1); // 取消 ID 为 1 的通知

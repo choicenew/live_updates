@@ -17,6 +17,7 @@ class LiveUpdatesPlugin : FlutterPlugin, MethodCallHandler, StreamHandler {
 
     companion object {
         private var eventSink: EventChannel.EventSink? = null
+        private var methodChannel: MethodChannel? = null
         
         @JvmStatic
         fun sendPayload(payload: String?) {
@@ -24,11 +25,19 @@ class LiveUpdatesPlugin : FlutterPlugin, MethodCallHandler, StreamHandler {
                 eventSink?.success(payload)
             }
         }
+
+        @JvmStatic
+        fun onNotificationTapped(payload: String?) {
+            Handler(Looper.getMainLooper()).post {
+                methodChannel?.invokeMethod("onNotificationTapped", payload)
+            }
+        }
     }
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "live_updates")
         channel.setMethodCallHandler(this)
+        methodChannel = channel
         
         payloadChannel = EventChannel(flutterPluginBinding.binaryMessenger, "live_updates/payload")
         payloadChannel.setStreamHandler(this)
@@ -64,6 +73,7 @@ class LiveUpdatesPlugin : FlutterPlugin, MethodCallHandler, StreamHandler {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        methodChannel = null
         payloadChannel.setStreamHandler(null)
     }
     
