@@ -207,6 +207,8 @@ LiveUpdates.showNotification(
   //   LiveUpdatePoint(progress: 75, label: '完成'),
   // ],
   // progressTrackerIcon: Uint8List.fromList([/* icon bytes */]), // Android 15+ 进度跟踪图标
+  autoCancel: true, // 点击后是否自动取消
+  timeoutAfter: Duration(seconds: 30), // 30秒后自动取消
 );
 
 // 更新进度
@@ -268,6 +270,8 @@ LiveUpdates.showLayoutNotification(
       isVisible: true, // 控制视图可见性
     ),
   },
+  autoCancel: false, // 点击后是否自动取消
+  timeoutAfter: Duration(minutes: 1), // 1分钟后自动取消
 );
 ```
 

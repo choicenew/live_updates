@@ -1,14 +1,16 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
-import 'package:live_updates/models/custom_view_data.dart';
-import 'package:live_updates/models/live_update_progress_data.dart';
+import './models/custom_view_data.dart';
+import './models/live_update_progress_data.dart';
 
 typedef NotificationTapCallback = void Function(String? payload);
 
 class LiveUpdates {
   static const MethodChannel _channel = MethodChannel('live_updates');
-  static const EventChannel _payloadChannel = EventChannel('live_updates/payload');
+  static const EventChannel _payloadChannel = EventChannel(
+    'live_updates/payload',
+  );
 
   static Stream<String?>? _notificationPayloadStream;
 
@@ -33,7 +35,9 @@ class LiveUpdates {
   }
 
   static Stream<String?> get notificationPayloadStream {
-    _notificationPayloadStream ??= _payloadChannel.receiveBroadcastStream().cast<String?>();
+    _notificationPayloadStream ??= _payloadChannel
+        .receiveBroadcastStream()
+        .cast<String?>();
     return _notificationPayloadStream!;
   }
 
@@ -48,9 +52,12 @@ class LiveUpdates {
     String? payload,
     String? smallIconName,
     String? title,
+    bool? autoCancel,
+    Duration? timeoutAfter,
   }) async {
-    final Map<String, Map<String, dynamic>> viewDataMaps =
-        viewData.map((key, value) => MapEntry(key, value.toMap()));
+    final Map<String, Map<String, dynamic>> viewDataMaps = viewData.map(
+      (key, value) => MapEntry(key, value.toMap()),
+    );
 
     await _channel.invokeMethod('showLayoutNotification', {
       'notificationId': notificationId,
@@ -60,6 +67,8 @@ class LiveUpdates {
       'payload': payload,
       'smallIconName': smallIconName,
       'title': title,
+      'autoCancel': autoCancel,
+      'timeoutAfter': timeoutAfter?.inMilliseconds,
     });
   }
 
@@ -77,6 +86,8 @@ class LiveUpdates {
     List<LiveUpdateSegment>? progressSegments,
     List<LiveUpdatePoint>? progressPoints,
     Uint8List? progressTrackerIcon,
+    bool? autoCancel,
+    Duration? timeoutAfter,
   }) async {
     await _channel.invokeMethod('showNotification', {
       'notificationId': notificationId,
@@ -91,6 +102,8 @@ class LiveUpdates {
       'progressSegments': progressSegments?.map((s) => s.toMap()).toList(),
       'progressPoints': progressPoints?.map((p) => p.toMap()).toList(),
       'progressTrackerIcon': progressTrackerIcon,
+      'autoCancel': autoCancel,
+      'timeoutAfter': timeoutAfter?.inMilliseconds,
     });
   }
 

@@ -5,8 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.graphics.Bitmap // <--- 在这里添加了缺失的导入
-
+import android.graphics.Bitmap
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Icon
@@ -46,6 +45,8 @@ class LiveUpdateManager(private val context: Context) {
         val payload = call.argument<String>("payload")
         val smallIconName = call.argument<String>("smallIconName")
         val title = call.argument<String>("title") ?: ""
+        val autoCancel = call.argument<Boolean>("autoCancel")
+        val timeoutAfter = call.argument<Number>("timeoutAfter")?.toLong()
         
         val layoutId = context.resources.getIdentifier(layoutName, "layout", context.packageName)
         if (layoutId == 0) {
@@ -77,8 +78,6 @@ class LiveUpdateManager(private val context: Context) {
                 }
                 
                 "imageView" -> {
-                             // ==================== 重要的修正从这里开始 ====================
-
                     val imageBytes = data["imageBytes"] as? ByteArray
                     val widthDp = (data["width"] as? Number)?.toFloat()
                     val heightDp = (data["height"] as? Number)?.toFloat()
@@ -109,22 +108,7 @@ class LiveUpdateManager(private val context: Context) {
                         remoteViews.setImageViewBitmap(viewResId, bitmap)
                         Log.d("LiveUpdateManager", "[$viewIdName] Set original bitmap without scaling.")
                     }                                              
-                                                                                                                                                                  
-                                                                                                            
                  }
-
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-
-
             }
         }
 
@@ -135,22 +119,19 @@ class LiveUpdateManager(private val context: Context) {
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(if (smallIconId != 0) smallIconId else android.R.drawable.ic_dialog_info)
-                 .setContentTitle(title)
-                 
+            .setContentTitle(title)
             .setCustomContentView(remoteViews)
             .setCustomBigContentView(remoteViews)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-      
             .setOngoing(ongoing)
-            .setAutoCancel(!ongoing)
+            .setAutoCancel(autoCancel ?: !ongoing)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-        
 
-
-
-
+        if (timeoutAfter != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setTimeoutAfter(timeoutAfter)
+        }
 
         notificationManager.notify(notificationId, builder.build())
     }
@@ -162,6 +143,8 @@ class LiveUpdateManager(private val context: Context) {
         val ongoing = call.argument<Boolean>("ongoing") ?: true
         val payload = call.argument<String>("payload")
         val style = call.argument<String>("style")
+        val autoCancel = call.argument<Boolean>("autoCancel")
+        val timeoutAfter = call.argument<Number>("timeoutAfter")?.toLong()
 
         val intent = Intent(context, NotificationClickReceiver::class.java).apply { putExtra("payload", payload) }
         val pendingIntent = PendingIntent.getBroadcast(context, notificationId, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -174,8 +157,12 @@ class LiveUpdateManager(private val context: Context) {
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setOngoing(ongoing)
                 .setContentIntent(pendingIntent)
-                
-                .setPriority(Notification.PRIORITY_HIGH) // <-- 在这里添加！确保通知能弹出
+                .setPriority(Notification.PRIORITY_HIGH)
+                .setAutoCancel(autoCancel ?: !ongoing)
+
+            if (timeoutAfter != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                nativeBuilder.setTimeoutAfter(timeoutAfter)
+            }
 
             val progress = (call.argument<Number>("progress") ?: 0).toInt()
             val progressPoints = call.argument<List<Map<String, Any>>>("progressPoints")
@@ -211,9 +198,8 @@ class LiveUpdateManager(private val context: Context) {
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(ongoing)
-            .setAutoCancel(!ongoing)
+            .setAutoCancel(autoCancel ?: !ongoing)
             .setContentIntent(pendingIntent)
-          
 
         when (style) {
             "progress" -> {
@@ -231,17 +217,15 @@ class LiveUpdateManager(private val context: Context) {
                 val declineIntent = PendingIntent.getBroadcast(context, notificationId + 2, Intent(context, NotificationClickReceiver::class.java).setAction("DECLINE"), PendingIntent.FLAG_IMMUTABLE)
                 val answerIntent = PendingIntent.getBroadcast(context, notificationId + 3, Intent(context, NotificationClickReceiver::class.java).setAction("ANSWER"), PendingIntent.FLAG_IMMUTABLE)
                 builder.setStyle(NotificationCompat.CallStyle.forIncomingCall(person, declineIntent, answerIntent))
-                
-
-
-
-
-
             }
             else -> {
                 builder.setCategory(NotificationCompat.CATEGORY_SERVICE)
                 builder.setStyle(NotificationCompat.BigTextStyle().bigText(text))
             }
+        }
+
+        if (timeoutAfter != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setTimeoutAfter(timeoutAfter)
         }
 
         if (Build.VERSION.SDK_INT >= 34) {

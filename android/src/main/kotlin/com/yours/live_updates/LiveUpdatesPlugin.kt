@@ -28,8 +28,12 @@ class LiveUpdatesPlugin : FlutterPlugin, MethodCallHandler, StreamHandler {
 
         @JvmStatic
         fun onNotificationTapped(payload: String?) {
+            android.util.Log.d("LiveUpdatesPlugin", "onNotificationTapped called with payload: $payload")
+            android.util.Log.d("LiveUpdatesPlugin", "methodChannel is null: ${methodChannel == null}")
             Handler(Looper.getMainLooper()).post {
+                android.util.Log.d("LiveUpdatesPlugin", "Invoking method 'onNotificationTapped' on Dart side")
                 methodChannel?.invokeMethod("onNotificationTapped", payload)
+                android.util.Log.d("LiveUpdatesPlugin", "Method invoked successfully")
             }
         }
     }

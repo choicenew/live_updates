@@ -211,6 +211,8 @@ LiveUpdates.showNotification(
   //   LiveUpdatePoint(progress: 75, label: 'Complete'),
   // ],
   // progressTrackerIcon: Uint8List.fromList([/* icon bytes */]), // Android 15+ progress tracker icon
+  autoCancel: true, // Whether to cancel the notification when clicked
+  timeoutAfter: Duration(seconds: 30), // Automatically cancel after 30 seconds
 );
 
 // Update progress
@@ -272,6 +274,8 @@ LiveUpdates.showLayoutNotification(
       isVisible: true, // Control view visibility
     ),
   },
+  autoCancel: false, // Whether to cancel the notification when clicked
+  timeoutAfter: Duration(minutes: 1), // Automatically cancel after 1 minute
 );
 ```
 
