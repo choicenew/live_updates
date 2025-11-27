@@ -49,6 +49,8 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
   late NotificationStyle _currentStyle;
   final int notificationId = 101;
   bool _isPreviewExpanded = true;
+  bool _autoCancel = false;
+  double _timeoutSeconds = 0;
 
   @override
   void initState() {
@@ -104,6 +106,10 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
             textSize: _currentStyle.alertFontSize,
             position: _currentStyle.alertPosition),
       },
+      autoCancel: _autoCancel,
+      timeoutAfter: _timeoutSeconds > 0
+          ? Duration(seconds: _timeoutSeconds.toInt())
+          : null,
     );
   }
 
@@ -181,6 +187,29 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
                     (val) => setState(() => _currentStyle.alertFontSize = val)),
                 _buildPositionEditor('Position', _currentStyle.alertPosition,
                     (pos) => setState(() => _currentStyle.alertPosition = pos)),
+
+                const Divider(),
+                _buildSectionTitle('Auto Cancel Settings'),
+                SwitchListTile(
+                  title: const Text('Auto Cancel on Click'),
+                  value: _autoCancel,
+                  onChanged: (val) => setState(() => _autoCancel = val),
+                ),
+                _buildSlider(
+                  'Timeout (s)',
+                  _timeoutSeconds,
+                  0,
+                  60,
+                  (val) => setState(() => _timeoutSeconds = val),
+                ),
+                if (_timeoutSeconds > 0)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Text(
+                      'Will auto-cancel after ${_timeoutSeconds.toInt()} seconds',
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ),
               ],
             ),
           ),
